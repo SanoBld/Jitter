@@ -1,4 +1,4 @@
-name: Build Desktop Apps
+name: Build Desktop & Mobile Apps
 
 on:
   push:
@@ -67,3 +67,34 @@ jobs:
         with:
           name: Jitter-Linux
           path: build/linux/x64/release/bundle/
+
+  # ─── COMPILATION ANDROID (APK) ─────────────────────────────────────
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java (Requis pour Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jitter-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk

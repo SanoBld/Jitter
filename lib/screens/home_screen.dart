@@ -482,16 +482,16 @@ class _ChartPainter extends CustomPainter {
     final maxV = points.reduce(max).clamp(1.0, double.infinity);
     final stepX = size.width / (points.length - 1);
 
-    double _y(double v) => size.height - (v / maxV * size.height * 0.88);
+    double y(double v) => size.height - (v / maxV * size.height * 0.88);
 
     final line = Path()
-      ..moveTo(0, _y(points[0]));
+      ..moveTo(0, y(points[0]));
 
     for (int i = 1; i < points.length; i++) {
       final x = i * stepX;
       final prevX = (i - 1) * stepX;
       final cpX = (prevX + x) / 2;
-      line.cubicTo(cpX, _y(points[i - 1]), cpX, _y(points[i]), x, _y(points[i]));
+      line.cubicTo(cpX, y(points[i - 1]), cpX, y(points[i]), x, y(points[i]));
     }
 
     // Fill
