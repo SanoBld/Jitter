@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 class SpeedServer {
@@ -7,6 +8,8 @@ class SpeedServer {
   final String provider;
   final String flag;
   final String downloadUrl;
+  /// true = fonctionne sur Flutter Web (header CORS présent)
+  final bool corsCompatible;
 
   const SpeedServer({
     required this.name,
@@ -14,6 +17,7 @@ class SpeedServer {
     required this.provider,
     required this.flag,
     required this.downloadUrl,
+    this.corsCompatible = false,
   });
 
   String get pingUrl => downloadUrl;
@@ -23,6 +27,26 @@ class SpeedServer {
 
 class InternetSpeedService {
   static const List<SpeedServer> servers = [
+    // ── Serveurs CORS-compatibles (web + natif) ────────────────────────────
+    // Cloudflare speed.cloudflare.com envoie Access-Control-Allow-Origin: *
+    SpeedServer(
+      name: 'Cloudflare Global',
+      location: 'Anycast, Global',
+      provider: 'Cloudflare',
+      flag: '🌐',
+      downloadUrl: 'https://speed.cloudflare.com/__down?bytes=104857600',
+      corsCompatible: true,
+    ),
+    SpeedServer(
+      name: 'Cloudflare 10 MB',
+      location: 'Anycast, Global',
+      provider: 'Cloudflare',
+      flag: '🌐',
+      downloadUrl: 'https://speed.cloudflare.com/__down?bytes=10485760',
+      corsCompatible: true,
+    ),
+
+    // ── Serveurs natifs uniquement (pas de CORS) ──────────────────────────
     SpeedServer(
       name: 'Paris',
       location: 'Paris, FR',
@@ -81,33 +105,47 @@ class InternetSpeedService {
     ),
   ];
 
-  // ── Upload: serveurs alternatifs plus fiables que httpbin ─────────────────
-  // httpbin.org est souvent lent ou down. On essaie plusieurs endpoints.
+  /// Retourne uniquement les serveurs disponibles sur la plateforme courante.
+  static List<SpeedServer> get availableServers =>
+      kIsWeb ? servers.where((s) => s.corsCompatible).toList() : servers;
+
+  /// Vérifie si le serveur sélectionné est compatible avec la plateforme.
+  /// Retourne l'index corrigé si nécessaire.
+  static int resolveServerIndex(int index) {
+    if (!kIsWeb) return index.clamp(0, servers.length - 1);
+    final available = availableServers;
+    if (available.isEmpty) return 0;
+    // Sur web, on ne peut utiliser que les serveurs CORS-compatibles
+    final server = servers[index.clamp(0, servers.length - 1)];
+    if (server.corsCompatible) return index;
+    // Fallback vers le premier serveur CORS-compatible
+    return servers.indexOf(available.first);
+  }
+
   static const List<String> _uploadUrls = [
-    'https://www.cloudflare.com/cdn-cgi/trace', // léger, juste pour mesure
+    // Cloudflare upload endpoint — CORS-compatible
+    'https://speed.cloudflare.com/__up',
     'https://httpbin.org/post',
     'https://postman-echo.com/post',
   ];
 
   static const Duration _connectTimeout = Duration(seconds: 10);
-  // FIX: timeout global couvrant AUSSI la lecture du stream
   static const Duration _streamTimeout  = Duration(seconds: 45);
 
   // ── Ping ──────────────────────────────────────────────────────────────────
-  // GET avec Range: bytes=0-0 → on ne télécharge qu'1 octet.
-  // Évite les 405 des CDN qui rejettent HEAD.
   Future<int> testPing(int serverIndex) async {
-    final server = _server(serverIndex);
+    final resolvedIndex = resolveServerIndex(serverIndex);
+    final server = servers[resolvedIndex];
     final client = http.Client();
     final sw = Stopwatch()..start();
     try {
       final request = http.Request('GET', Uri.parse(server.pingUrl));
-      request.headers['Range'] = 'bytes=0-0';
-      final response = await client
-          .send(request)
-          .timeout(_connectTimeout);
+      // Sur web : pas de Range header (peut causer des CORS preflight)
+      if (!kIsWeb) request.headers['Range'] = 'bytes=0-0';
+      final response =
+          await client.send(request).timeout(_connectTimeout);
       sw.stop();
-      await response.stream.drain<void>(); // libère proprement la connexion
+      await response.stream.drain<void>();
       if (response.statusCode == 200 || response.statusCode == 206) {
         return sw.elapsedMilliseconds;
       }
@@ -124,16 +162,14 @@ class InternetSpeedService {
   }
 
   // ── Download ──────────────────────────────────────────────────────────────
-  // FIX principal : le timeout couvre maintenant TOUTE la durée du stream
-  // via un StreamController avec timer de garde, et non plus juste le
-  // client.send() initial (qui réussissait même sur APK sans permission).
   Stream<double> testDownloadSpeed({
     required int serverIndex,
     required int maxMB,
   }) {
+    final resolvedIndex = resolveServerIndex(serverIndex);
     final controller = StreamController<double>();
     _downloadInternal(
-      serverIndex: serverIndex,
+      serverIndex: resolvedIndex,
       maxMB: maxMB,
       controller: controller,
     );
@@ -145,11 +181,9 @@ class InternetSpeedService {
     required int maxMB,
     required StreamController<double> controller,
   }) async {
-    final server = _server(serverIndex);
+    final server = servers[serverIndex];
     final client = http.Client();
     final sw = Stopwatch()..start();
-
-    // Watchdog : si aucun chunk n'arrive pendant 10 s → erreur réseau
     Timer? watchdog;
 
     void resetWatchdog() {
@@ -157,7 +191,8 @@ class InternetSpeedService {
       watchdog = Timer(const Duration(seconds: 10), () {
         if (!controller.isClosed) {
           controller.addError(
-            TimeoutException('No data received for 10 seconds — check network'),
+            TimeoutException(
+                'Aucune donnée reçue depuis 10 s — vérifiez le réseau'),
           );
           controller.close();
           client.close();
@@ -167,32 +202,29 @@ class InternetSpeedService {
 
     try {
       final request = http.Request('GET', Uri.parse(server.downloadUrl));
-      // FIX: timeout uniquement sur la connexion initiale
-      final response = await client.send(request).timeout(_connectTimeout);
+      final response =
+          await client.send(request).timeout(_connectTimeout);
 
       if (response.statusCode >= 400) {
         throw Exception(
-          'Server ${server.name} returned HTTP ${response.statusCode}',
-        );
+            'Serveur ${server.name} : HTTP ${response.statusCode}');
       }
 
       int received = 0;
       final maxBytes = maxMB * 1024 * 1024;
-
       resetWatchdog();
 
-      await for (final chunk in response.stream
-          .timeout(_streamTimeout, onTimeout: (sink) {
-        sink.addError(TimeoutException('Stream global timeout ($_streamTimeout)'));
-        sink.close();
-      })) {
+      await for (final chunk in response.stream.timeout(
+        _streamTimeout,
+        onTimeout: (sink) {
+          sink.addError(TimeoutException('Stream timeout ($_streamTimeout)'));
+          sink.close();
+        },
+      )) {
         resetWatchdog();
         received += chunk.length;
         final secs = sw.elapsedMilliseconds / 1000.0;
-
-        // Ignore les 0.5 premières secondes (warmup TCP)
         if (secs > 0.5) {
-          // octets → bits → mégabits/seconde
           controller.add((received * 8) / secs / (1024 * 1024));
         }
         if (received >= maxBytes) break;
@@ -218,12 +250,9 @@ class InternetSpeedService {
   }
 
   // ── Upload ────────────────────────────────────────────────────────────────
-  // FIX: essaie plusieurs endpoints upload, retourne la première réponse
-  // valide. Taille réduite à 2 MB par défaut (plus rapide, assez précis).
   Future<double> testUploadSpeed({int sizeMB = 2}) async {
     final payload =
         List<int>.generate(sizeMB * 1024 * 1024, (i) => i & 0xFF);
-
     for (final url in _uploadUrls) {
       final result = await _tryUpload(url: url, payload: payload);
       if (result > 0) return result;
@@ -239,13 +268,10 @@ class InternetSpeedService {
     try {
       final sw = Stopwatch()..start();
       final request = http.MultipartRequest('POST', Uri.parse(url))
-        ..files.add(
-          http.MultipartFile.fromBytes(
-            'file',
-            payload,
-            filename: 'upload.bin',
-          ),
-        );
+        ..files.add(http.MultipartFile.fromBytes(
+          'file', payload,
+          filename: 'upload.bin',
+        ));
       final response =
           await client.send(request).timeout(_streamTimeout);
       sw.stop();
@@ -261,7 +287,4 @@ class InternetSpeedService {
       client.close();
     }
   }
-
-  SpeedServer _server(int index) =>
-      servers[index.clamp(0, servers.length - 1)];
 }

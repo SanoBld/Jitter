@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../app_state.dart';
@@ -17,7 +18,6 @@ class _HomeScreenState extends State<HomeScreen>
   final _svc = InternetSpeedService();
   int _tabIndex = 0;
 
-  // ── Reactive state ────────────────────────────────────────────────────────
   final _speedNf    = ValueNotifier<double>(0.0);
   final _pingNf     = ValueNotifier<int>(0);
   final _dlNf       = ValueNotifier<double>(0.0);
@@ -26,8 +26,6 @@ class _HomeScreenState extends State<HomeScreen>
   final _phaseNf    = ValueNotifier<String>('READY');
   final _pointsNf   = ValueNotifier<List<double>>([]);
   final _progressNf = ValueNotifier<double>(0.0);
-
-  // FIX: état d'erreur affiché à l'utilisateur au lieu d'être avalé
   final _errorNf    = ValueNotifier<String?>(null);
 
   late AnimationController _pulse;
@@ -58,25 +56,28 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
   Future<void> _loadHistory() async {
     final p = await SharedPreferences.getInstance();
-    if (mounted) setState(() => _history = p.getStringList('speed_history') ?? []);
+    if (mounted) {
+      setState(() => _history = p.getStringList('speed_history') ?? []);
+    }
   }
 
   double _display(double mbps) =>
       speedUnitMbpsNotifier.value ? mbps : mbps / 8;
-
   String get _unit     => speedUnitMbpsNotifier.value ? 'Mb/s' : 'MB/s';
-  String get _unitLong => speedUnitMbpsNotifier.value ? 'MEGABITS / S' : 'MEGABYTES / S';
+  String get _unitLong =>
+      speedUnitMbpsNotifier.value ? 'MEGABITS / S' : 'MEGABYTES / S';
 
-  // ── Test logic ────────────────────────────────────────────────────────────
+  // ── Test ──────────────────────────────────────────────────────────────────
   Future<void> _runTest() async {
-    final srv = selectedServerNotifier.value;
-    final sz  = downloadSizeMBNotifier.value;
+    // Sur web : force un serveur CORS-compatible si celui sélectionné ne l'est pas
+    final rawIdx = selectedServerNotifier.value;
+    final srv    = InternetSpeedService.resolveServerIndex(rawIdx);
+    final sz     = downloadSizeMBNotifier.value;
 
     _testingNf.value  = true;
-    _errorNf.value    = null;  // efface l'erreur précédente
+    _errorNf.value    = null;
     _speedNf.value    = 0;
     _dlNf.value       = 0;
     _ulNf.value       = 0;
@@ -85,14 +86,11 @@ class _HomeScreenState extends State<HomeScreen>
     _progressNf.value = 0;
 
     try {
-      // ── Ping ──────────────────────────────────────────────────────────────
       _phaseNf.value    = 'PING';
       _pingNf.value     = await _svc.testPing(srv);
       _progressNf.value = 0.08;
 
-      // ── Download ──────────────────────────────────────────────────────────
       _phaseNf.value = 'DOWNLOAD';
-      // FIX: on propage maintenant l'erreur au lieu de catch (_) {}
       await for (final mbps in _svc.testDownloadSpeed(
           serverIndex: srv, maxMB: sz)) {
         _speedNf.value = mbps;
@@ -107,17 +105,14 @@ class _HomeScreenState extends State<HomeScreen>
       _progressNf.value = 0.65;
       _pointsNf.value   = [];
 
-      // ── Upload ────────────────────────────────────────────────────────────
       _phaseNf.value = 'UPLOAD';
       final ul          = await _svc.testUploadSpeed();
       _speedNf.value    = ul;
       _ulNf.value       = ul;
       _pointsNf.value   = [ul * 0.3, ul * 0.55, ul * 0.8, ul];
       _progressNf.value = 1.0;
+      _phaseNf.value    = 'COMPLETED';
 
-      _phaseNf.value = 'COMPLETED';
-
-      // ── Save history ──────────────────────────────────────────────────────
       if (autoSaveHistoryNotifier.value) {
         final server = InternetSpeedService.servers[srv];
         final dl  = _display(_dlNf.value);
@@ -134,22 +129,24 @@ class _HomeScreenState extends State<HomeScreen>
         if (mounted) setState(() {});
       }
     } catch (e) {
-      // FIX: affiche l'erreur clairement au lieu de l'avaler silencieusement.
-      // Sur APK sans permission INTERNET, c'est ici qu'on verrait
-      // "SocketException: Failed host lookup" ou "OS Error: Permission denied".
-      _phaseNf.value = 'ERROR';
-      _errorNf.value = _friendlyError(e.toString());
+      _phaseNf.value    = 'ERROR';
+      _errorNf.value    = _friendlyError(e.toString());
       _progressNf.value = 0;
     } finally {
       _testingNf.value = false;
     }
   }
 
-  /// Traduit les messages d'erreur techniques en messages lisibles.
   String _friendlyError(String raw) {
-    if (raw.contains('Permission denied') ||
-        raw.contains('INTERNET') ||
-        raw.contains('network_security_config')) {
+    // CORS (Flutter Web)
+    if (raw.contains('Failed to fetch') ||
+        raw.contains('XMLHttpRequest') ||
+        raw.contains('CORS') ||
+        raw.contains('cross-origin')) {
+      return 'Erreur CORS — ce serveur bloque les requêtes depuis un navigateur.\n'
+          'Utilisez un serveur Cloudflare (compatible web) ou lancez l\'APK Android.';
+    }
+    if (raw.contains('Permission denied') || raw.contains('INTERNET')) {
       return 'Permission réseau manquante.\nVérifiez AndroidManifest.xml.';
     }
     if (raw.contains('Failed host lookup') ||
@@ -166,7 +163,6 @@ class _HomeScreenState extends State<HomeScreen>
         raw.contains('CERTIFICATE_VERIFY_FAILED')) {
       return 'Erreur SSL — vérifiez la date/heure de votre appareil.';
     }
-    // Message brut pour les erreurs inconnues (utile pour le débogage)
     return 'Erreur : $raw';
   }
 
@@ -222,11 +218,12 @@ class _HomeScreenState extends State<HomeScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Bandeau web si on tourne dans un navigateur
+              if (kIsWeb) _webBanner(t),
               _header(t),
               Expanded(child: Center(child: _gauge(gaugeSize, t))),
               _chart(t),
               const SizedBox(height: 14),
-              // FIX: bandeau d'erreur visible sous le graphique
               _errorBanner(t),
               _statsRow(t),
               const SizedBox(height: 14),
@@ -236,6 +233,34 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         );
       },
+    );
+  }
+
+  // ── Web info banner ───────────────────────────────────────────────────────
+  Widget _webBanner(ThemeData t) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: t.colorScheme.tertiaryContainer.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: t.colorScheme.tertiary.withOpacity(0.35)),
+      ),
+      child: Row(children: [
+        Icon(Icons.public_rounded,
+            size: 16, color: t.colorScheme.tertiary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'Mode navigateur — seuls les serveurs Cloudflare sont disponibles (CORS).',
+            style: t.textTheme.labelSmall?.copyWith(
+              color: t.colorScheme.onTertiaryContainer,
+              height: 1.4,
+            ),
+          ),
+        ),
+      ]),
     );
   }
 
@@ -252,8 +277,8 @@ class _HomeScreenState extends State<HomeScreen>
           decoration: BoxDecoration(
             color: t.colorScheme.errorContainer.withOpacity(0.25),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-                color: t.colorScheme.error.withOpacity(0.4)),
+            border:
+                Border.all(color: t.colorScheme.error.withOpacity(0.4)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -282,8 +307,8 @@ class _HomeScreenState extends State<HomeScreen>
     return ValueListenableBuilder<int>(
       valueListenable: selectedServerNotifier,
       builder: (_, si, __) {
-        final srv = InternetSpeedService.servers[
-            si.clamp(0, InternetSpeedService.servers.length - 1)];
+        final resolvedIdx = InternetSpeedService.resolveServerIndex(si);
+        final srv = InternetSpeedService.servers[resolvedIdx];
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -448,9 +473,7 @@ class _HomeScreenState extends State<HomeScreen>
         builder: (_, v, __) => Text('$v $unit',
             style: t.textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w600,
-                fontFeatures: [
-                  const FontFeature.tabularFigures()
-                ])),
+                fontFeatures: [const FontFeature.tabularFigures()])),
       ),
     ]);
   }
@@ -515,13 +538,16 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── History tab ───────────────────────────────────────────────────────────
+  // ── History ───────────────────────────────────────────────────────────────
   Widget _buildHistory(ThemeData t) {
     return Padding(
       padding: const EdgeInsets.all(24),
-      child:
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+      child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+        Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
           Text('METRICS LOGS',
               style: t.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold, letterSpacing: 1.5)),
@@ -545,8 +571,8 @@ class _HomeScreenState extends State<HomeScreen>
                       children: [
                       Icon(Icons.history,
                           size: 48,
-                          color:
-                              t.colorScheme.onSurface.withOpacity(0.18)),
+                          color: t.colorScheme.onSurface
+                              .withOpacity(0.18)),
                       const SizedBox(height: 12),
                       Text('No telemetry saved.',
                           style: TextStyle(
@@ -561,7 +587,8 @@ class _HomeScreenState extends State<HomeScreen>
                   itemBuilder: (_, i) => Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: t.colorScheme.onSurface.withOpacity(0.04),
+                      color:
+                          t.colorScheme.onSurface.withOpacity(0.04),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                           color: t.colorScheme.onSurface
@@ -597,14 +624,12 @@ class _ChartPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (points.length < 2) return;
-
     final maxV = points.reduce(max).clamp(1.0, double.infinity);
     final stepX = size.width / (points.length - 1);
-
-    double y(double v) => size.height - (v / maxV * size.height * 0.88);
+    double y(double v) =>
+        size.height - (v / maxV * size.height * 0.88);
 
     final line = Path()..moveTo(0, y(points[0]));
-
     for (int i = 1; i < points.length; i++) {
       final x = i * stepX;
       final prevX = (i - 1) * stepX;
@@ -613,7 +638,6 @@ class _ChartPainter extends CustomPainter {
           cpX, y(points[i - 1]), cpX, y(points[i]), x, y(points[i]));
     }
 
-    // Fill
     final fill = Path.from(line)
       ..lineTo(size.width, size.height)
       ..lineTo(0, size.height)
@@ -623,8 +647,6 @@ class _ChartPainter extends CustomPainter {
         Paint()
           ..color = color.withOpacity(0.07)
           ..style = PaintingStyle.fill);
-
-    // Stroke
     canvas.drawPath(
         line,
         Paint()
