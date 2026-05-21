@@ -122,7 +122,7 @@ class _ThemePicker extends StatelessWidget {
             ],
             selected: {cur},
             onSelectionChanged: (s) => setThemeMode(s.first),
-            style: ButtonStyle(
+            style: const ButtonStyle(
               visualDensity: VisualDensity.compact,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
@@ -222,7 +222,7 @@ class _ServerList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
-    final servers = InternetSpeedService.servers;
+    const servers = InternetSpeedService.servers;
     return ValueListenableBuilder<int>(
       valueListenable: selectedServerNotifier,
       builder: (_, selected, __) => Column(
@@ -278,7 +278,7 @@ class _DownloadSizePicker extends StatelessWidget {
             ],
             selected: {cur},
             onSelectionChanged: (s) => setDownloadSize(s.first),
-            style: ButtonStyle(
+            style: const ButtonStyle(
               visualDensity: VisualDensity.compact,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
@@ -315,7 +315,7 @@ class _UnitPicker extends StatelessWidget {
             ],
             selected: {isMbps},
             onSelectionChanged: (s) => setSpeedUnit(s.first),
-            style: ButtonStyle(
+            style: const ButtonStyle(
               visualDensity: VisualDensity.compact,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
