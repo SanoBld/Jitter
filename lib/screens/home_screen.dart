@@ -27,6 +27,9 @@ class _HomeScreenState extends State<HomeScreen>
   final _pointsNf   = ValueNotifier<List<double>>([]);
   final _progressNf = ValueNotifier<double>(0.0);
 
+  // FIX: état d'erreur affiché à l'utilisateur au lieu d'être avalé
+  final _errorNf    = ValueNotifier<String?>(null);
+
   late AnimationController _pulse;
   List<String> _history = [];
 
@@ -51,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen>
     _phaseNf.dispose();
     _pointsNf.dispose();
     _progressNf.dispose();
+    _errorNf.dispose();
     super.dispose();
   }
 
@@ -63,7 +67,7 @@ class _HomeScreenState extends State<HomeScreen>
   double _display(double mbps) =>
       speedUnitMbpsNotifier.value ? mbps : mbps / 8;
 
-  String get _unit => speedUnitMbpsNotifier.value ? 'Mb/s' : 'MB/s';
+  String get _unit     => speedUnitMbpsNotifier.value ? 'Mb/s' : 'MB/s';
   String get _unitLong => speedUnitMbpsNotifier.value ? 'MEGABITS / S' : 'MEGABYTES / S';
 
   // ── Test logic ────────────────────────────────────────────────────────────
@@ -72,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen>
     final sz  = downloadSizeMBNotifier.value;
 
     _testingNf.value  = true;
+    _errorNf.value    = null;  // efface l'erreur précédente
     _speedNf.value    = 0;
     _dlNf.value       = 0;
     _ulNf.value       = 0;
@@ -79,54 +84,90 @@ class _HomeScreenState extends State<HomeScreen>
     _pointsNf.value   = [];
     _progressNf.value = 0;
 
-    // Ping
-    _phaseNf.value    = 'PING';
-    _pingNf.value     = await _svc.testPing(srv);
-    _progressNf.value = 0.08;
-
-    // Download
-    _phaseNf.value = 'DOWNLOAD';
     try {
-      await for (final mbps in _svc.testDownloadSpeed(serverIndex: srv, maxMB: sz)) {
+      // ── Ping ──────────────────────────────────────────────────────────────
+      _phaseNf.value    = 'PING';
+      _pingNf.value     = await _svc.testPing(srv);
+      _progressNf.value = 0.08;
+
+      // ── Download ──────────────────────────────────────────────────────────
+      _phaseNf.value = 'DOWNLOAD';
+      // FIX: on propage maintenant l'erreur au lieu de catch (_) {}
+      await for (final mbps in _svc.testDownloadSpeed(
+          serverIndex: srv, maxMB: sz)) {
         _speedNf.value = mbps;
         _dlNf.value    = mbps;
         final pts = List<double>.from(_pointsNf.value)..add(mbps);
         if (pts.length > 40) pts.removeAt(0);
         _pointsNf.value   = pts;
-        _progressNf.value = 0.08 + 0.57 * (pts.length / 40).clamp(0.0, 1.0);
+        _progressNf.value =
+            0.08 + 0.57 * (pts.length / 40).clamp(0.0, 1.0);
       }
-    } catch (_) {}
 
-    _progressNf.value = 0.65;
-    _pointsNf.value   = [];
+      _progressNf.value = 0.65;
+      _pointsNf.value   = [];
 
-    // Upload
-    _phaseNf.value = 'UPLOAD';
-    final ul = await _svc.testUploadSpeed();
-    _speedNf.value    = ul;
-    _ulNf.value       = ul;
-    _pointsNf.value   = [ul * 0.3, ul * 0.55, ul * 0.8, ul];
-    _progressNf.value = 1.0;
+      // ── Upload ────────────────────────────────────────────────────────────
+      _phaseNf.value = 'UPLOAD';
+      final ul          = await _svc.testUploadSpeed();
+      _speedNf.value    = ul;
+      _ulNf.value       = ul;
+      _pointsNf.value   = [ul * 0.3, ul * 0.55, ul * 0.8, ul];
+      _progressNf.value = 1.0;
 
-    _phaseNf.value   = 'COMPLETED';
-    _testingNf.value = false;
+      _phaseNf.value = 'COMPLETED';
 
-    // Save to history
-    if (autoSaveHistoryNotifier.value) {
-      final server = InternetSpeedService.servers[srv];
-      final dl = _display(_dlNf.value);
-      final ul2 = _display(_ulNf.value);
-      final entry =
-          '${DateTime.now().toLocal().toString().substring(0, 16)}  |  '
-          '${server.flag} ${server.name}  |  '
-          '🔽 ${dl.toStringAsFixed(1)} $_unit  '
-          '🔼 ${ul2.toStringAsFixed(1)} $_unit  '
-          '📶 ${_pingNf.value} ms';
-      _history.insert(0, entry);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList('speed_history', _history);
-      if (mounted) setState(() {});
+      // ── Save history ──────────────────────────────────────────────────────
+      if (autoSaveHistoryNotifier.value) {
+        final server = InternetSpeedService.servers[srv];
+        final dl  = _display(_dlNf.value);
+        final ul2 = _display(_ulNf.value);
+        final entry =
+            '${DateTime.now().toLocal().toString().substring(0, 16)}  |  '
+            '${server.flag} ${server.name}  |  '
+            '🔽 ${dl.toStringAsFixed(1)} $_unit  '
+            '🔼 ${ul2.toStringAsFixed(1)} $_unit  '
+            '📶 ${_pingNf.value} ms';
+        _history.insert(0, entry);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setStringList('speed_history', _history);
+        if (mounted) setState(() {});
+      }
+    } catch (e) {
+      // FIX: affiche l'erreur clairement au lieu de l'avaler silencieusement.
+      // Sur APK sans permission INTERNET, c'est ici qu'on verrait
+      // "SocketException: Failed host lookup" ou "OS Error: Permission denied".
+      _phaseNf.value = 'ERROR';
+      _errorNf.value = _friendlyError(e.toString());
+      _progressNf.value = 0;
+    } finally {
+      _testingNf.value = false;
     }
+  }
+
+  /// Traduit les messages d'erreur techniques en messages lisibles.
+  String _friendlyError(String raw) {
+    if (raw.contains('Permission denied') ||
+        raw.contains('INTERNET') ||
+        raw.contains('network_security_config')) {
+      return 'Permission réseau manquante.\nVérifiez AndroidManifest.xml.';
+    }
+    if (raw.contains('Failed host lookup') ||
+        raw.contains('No address associated')) {
+      return 'Impossible de résoudre le serveur.\nVérifiez votre connexion internet.';
+    }
+    if (raw.contains('SocketException')) {
+      return 'Erreur réseau : pas de connexion internet.';
+    }
+    if (raw.contains('TimeoutException') || raw.contains('timeout')) {
+      return 'Le serveur ne répond pas (timeout).\nEssayez un autre serveur.';
+    }
+    if (raw.contains('HandshakeException') ||
+        raw.contains('CERTIFICATE_VERIFY_FAILED')) {
+      return 'Erreur SSL — vérifiez la date/heure de votre appareil.';
+    }
+    // Message brut pour les erreurs inconnues (utile pour le débogage)
+    return 'Erreur : $raw';
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -146,7 +187,8 @@ class _HomeScreenState extends State<HomeScreen>
         selectedIndex: _tabIndex,
         onDestinationSelected: (i) => setState(() => _tabIndex = i),
         backgroundColor: theme.colorScheme.surface,
-        indicatorColor: theme.colorScheme.primaryContainer.withOpacity(0.5),
+        indicatorColor:
+            theme.colorScheme.primaryContainer.withOpacity(0.5),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.speed_outlined),
@@ -172,22 +214,62 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _buildDashboard(ThemeData t) {
     return LayoutBuilder(
       builder: (ctx, constraints) {
-        // Gauge adapts to available height → no overflow
-        final gaugeSize = (constraints.maxHeight * 0.30).clamp(150.0, 260.0);
+        final gaugeSize =
+            (constraints.maxHeight * 0.30).clamp(150.0, 260.0);
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _header(t),
-              // Gauge fills remaining vertical space
               Expanded(child: Center(child: _gauge(gaugeSize, t))),
               _chart(t),
               const SizedBox(height: 14),
+              // FIX: bandeau d'erreur visible sous le graphique
+              _errorBanner(t),
               _statsRow(t),
               const SizedBox(height: 14),
               _startButton(t),
               const SizedBox(height: 6),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Error banner ──────────────────────────────────────────────────────────
+  Widget _errorBanner(ThemeData t) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: _errorNf,
+      builder: (_, err, __) {
+        if (err == null) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: t.colorScheme.errorContainer.withOpacity(0.25),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: t.colorScheme.error.withOpacity(0.4)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.wifi_off_rounded,
+                  size: 18, color: t.colorScheme.error),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  err,
+                  style: t.textTheme.bodySmall?.copyWith(
+                    color: t.colorScheme.onErrorContainer,
+                    height: 1.5,
+                  ),
+                ),
+              ),
             ],
           ),
         );
@@ -200,42 +282,51 @@ class _HomeScreenState extends State<HomeScreen>
     return ValueListenableBuilder<int>(
       valueListenable: selectedServerNotifier,
       builder: (_, si, __) {
-        final srv = InternetSpeedService
-            .servers[si.clamp(0, InternetSpeedService.servers.length - 1)];
+        final srv = InternetSpeedService.servers[
+            si.clamp(0, InternetSpeedService.servers.length - 1)];
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('CORE NODE',
-                  style: t.textTheme.labelSmall?.copyWith(
-                      color: t.colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5)),
-              const SizedBox(height: 2),
-              Text('${srv.flag} ${srv.location} (${srv.provider})',
-                  style: t.textTheme.bodySmall
-                      ?.copyWith(color: t.colorScheme.onSurface.withOpacity(0.6))),
-            ]),
+            Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('CORE NODE',
+                      style: t.textTheme.labelSmall?.copyWith(
+                          color: t.colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5)),
+                  const SizedBox(height: 2),
+                  Text(
+                      '${srv.flag} ${srv.location} (${srv.provider})',
+                      style: t.textTheme.bodySmall?.copyWith(
+                          color: t.colorScheme.onSurface
+                              .withOpacity(0.6))),
+                ]),
             ValueListenableBuilder<bool>(
               valueListenable: _testingNf,
               builder: (_, testing, __) => Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: testing
                       ? t.colorScheme.errorContainer.withOpacity(0.2)
-                      : t.colorScheme.primaryContainer.withOpacity(0.2),
+                      : t.colorScheme.primaryContainer
+                          .withOpacity(0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(children: [
                   AnimatedBuilder(
                     animation: _pulse,
                     builder: (_, __) => Container(
-                      width: 8, height: 8,
+                      width: 8,
+                      height: 8,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: testing
-                            ? t.colorScheme.error.withOpacity(_pulse.value)
-                            : t.colorScheme.primary.withOpacity(_pulse.value),
+                            ? t.colorScheme.error
+                                .withOpacity(_pulse.value)
+                            : t.colorScheme.primary
+                                .withOpacity(_pulse.value),
                       ),
                     ),
                   ),
@@ -244,7 +335,8 @@ class _HomeScreenState extends State<HomeScreen>
                     valueListenable: _phaseNf,
                     builder: (_, phase, __) => Text(phase,
                         style: t.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.0)),
                   ),
                 ]),
               ),
@@ -267,12 +359,15 @@ class _HomeScreenState extends State<HomeScreen>
             final displaySpeed = isMbps ? mbps : mbps / 8;
             return Stack(alignment: Alignment.center, children: [
               SizedBox(
-                width: size, height: size,
+                width: size,
+                height: size,
                 child: CircularProgressIndicator(
                   value: progress,
                   strokeWidth: 2.5,
-                  backgroundColor: t.colorScheme.onSurface.withOpacity(0.06),
-                  valueColor: AlwaysStoppedAnimation<Color>(t.colorScheme.primary),
+                  backgroundColor:
+                      t.colorScheme.onSurface.withOpacity(0.06),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                      t.colorScheme.primary),
                 ),
               ),
               Column(mainAxisSize: MainAxisSize.min, children: [
@@ -281,13 +376,16 @@ class _HomeScreenState extends State<HomeScreen>
                   style: t.textTheme.displayLarge?.copyWith(
                     fontSize: size * 0.26,
                     fontWeight: FontWeight.w200,
-                    fontFeatures: [const FontFeature.tabularFigures()],
+                    fontFeatures: [
+                      const FontFeature.tabularFigures()
+                    ],
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(_unitLong,
                     style: t.textTheme.labelSmall?.copyWith(
-                        color: t.colorScheme.onSurface.withOpacity(0.4),
+                        color:
+                            t.colorScheme.onSurface.withOpacity(0.4),
                         letterSpacing: 2.0)),
               ]),
             ]);
@@ -304,7 +402,8 @@ class _HomeScreenState extends State<HomeScreen>
       child: ValueListenableBuilder<List<double>>(
         valueListenable: _pointsNf,
         builder: (_, pts, __) => CustomPaint(
-          painter: _ChartPainter(points: pts, color: t.colorScheme.primary),
+          painter:
+              _ChartPainter(points: pts, color: t.colorScheme.primary),
           child: const SizedBox.expand(),
         ),
       ),
@@ -314,13 +413,17 @@ class _HomeScreenState extends State<HomeScreen>
   // ── Stats row ─────────────────────────────────────────────────────────────
   Widget _statsRow(ThemeData t) {
     final div = Container(
-        width: 1, height: 28, color: t.colorScheme.onSurface.withOpacity(0.1));
+        width: 1,
+        height: 28,
+        color: t.colorScheme.onSurface.withOpacity(0.1));
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
         color: t.colorScheme.onSurface.withOpacity(0.04),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: t.colorScheme.onSurface.withOpacity(0.06)),
+        border:
+            Border.all(color: t.colorScheme.onSurface.withOpacity(0.06)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -335,7 +438,8 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _intStat(String label, ValueNotifier<int> nf, String unit, ThemeData t) {
+  Widget _intStat(
+      String label, ValueNotifier<int> nf, String unit, ThemeData t) {
     return Column(children: [
       _statLabel(label, t),
       const SizedBox(height: 4),
@@ -344,12 +448,15 @@ class _HomeScreenState extends State<HomeScreen>
         builder: (_, v, __) => Text('$v $unit',
             style: t.textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w600,
-                fontFeatures: [const FontFeature.tabularFigures()])),
+                fontFeatures: [
+                  const FontFeature.tabularFigures()
+                ])),
       ),
     ]);
   }
 
-  Widget _dblStat(String label, ValueNotifier<double> nf, ThemeData t) {
+  Widget _dblStat(
+      String label, ValueNotifier<double> nf, ThemeData t) {
     return Column(children: [
       _statLabel(label, t),
       const SizedBox(height: 4),
@@ -362,7 +469,9 @@ class _HomeScreenState extends State<HomeScreen>
             return Text('${v.toStringAsFixed(1)} $_unit',
                 style: t.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,
-                    fontFeatures: [const FontFeature.tabularFigures()]));
+                    fontFeatures: [
+                      const FontFeature.tabularFigures()
+                    ]));
           },
         ),
       ),
@@ -389,7 +498,8 @@ class _HomeScreenState extends State<HomeScreen>
                 : t.colorScheme.primary,
             width: 1.5,
           ),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(100)),
         ),
         child: Text(
           testing ? 'RUNNING METRICS...' : 'START TEST',
@@ -409,11 +519,12 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _buildHistory(ThemeData t) {
     return Padding(
       padding: const EdgeInsets.all(24),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      child:
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text('METRICS LOGS',
-              style: t.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+              style: t.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold, letterSpacing: 1.5)),
           if (_history.isNotEmpty)
             TextButton.icon(
               onPressed: _clearHistory,
@@ -429,30 +540,39 @@ class _HomeScreenState extends State<HomeScreen>
         Expanded(
           child: _history.isEmpty
               ? Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.history, size: 48,
-                        color: t.colorScheme.onSurface.withOpacity(0.18)),
-                    const SizedBox(height: 12),
-                    Text('No telemetry saved.',
-                        style: TextStyle(
-                            color: t.colorScheme.onSurface.withOpacity(0.4))),
-                  ]),
+                  child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                      Icon(Icons.history,
+                          size: 48,
+                          color:
+                              t.colorScheme.onSurface.withOpacity(0.18)),
+                      const SizedBox(height: 12),
+                      Text('No telemetry saved.',
+                          style: TextStyle(
+                              color: t.colorScheme.onSurface
+                                  .withOpacity(0.4))),
+                    ]),
                 )
               : ListView.separated(
                   itemCount: _history.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  separatorBuilder: (_, __) =>
+                      const SizedBox(height: 8),
                   itemBuilder: (_, i) => Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: t.colorScheme.onSurface.withOpacity(0.04),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                          color: t.colorScheme.onSurface.withOpacity(0.06)),
+                          color: t.colorScheme.onSurface
+                              .withOpacity(0.06)),
                     ),
                     child: Text(_history[i],
                         style: t.textTheme.bodySmall?.copyWith(
                             height: 1.6,
-                            fontFeatures: [const FontFeature.tabularFigures()])),
+                            fontFeatures: [
+                              const FontFeature.tabularFigures()
+                            ])),
                   ),
                 ),
         ),
@@ -483,14 +603,14 @@ class _ChartPainter extends CustomPainter {
 
     double y(double v) => size.height - (v / maxV * size.height * 0.88);
 
-    final line = Path()
-      ..moveTo(0, y(points[0]));
+    final line = Path()..moveTo(0, y(points[0]));
 
     for (int i = 1; i < points.length; i++) {
       final x = i * stepX;
       final prevX = (i - 1) * stepX;
       final cpX = (prevX + x) / 2;
-      line.cubicTo(cpX, y(points[i - 1]), cpX, y(points[i]), x, y(points[i]));
+      line.cubicTo(
+          cpX, y(points[i - 1]), cpX, y(points[i]), x, y(points[i]));
     }
 
     // Fill
@@ -498,8 +618,11 @@ class _ChartPainter extends CustomPainter {
       ..lineTo(size.width, size.height)
       ..lineTo(0, size.height)
       ..close();
-    canvas.drawPath(fill,
-        Paint()..color = color.withOpacity(0.07)..style = PaintingStyle.fill);
+    canvas.drawPath(
+        fill,
+        Paint()
+          ..color = color.withOpacity(0.07)
+          ..style = PaintingStyle.fill);
 
     // Stroke
     canvas.drawPath(
@@ -513,5 +636,6 @@ class _ChartPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ChartPainter old) => old.points != points;
+  bool shouldRepaint(covariant _ChartPainter old) =>
+      old.points != points;
 }

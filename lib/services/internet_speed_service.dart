@@ -81,11 +81,21 @@ class InternetSpeedService {
     ),
   ];
 
-  static const String _uploadUrl = 'https://httpbin.org/post';
-  static const Duration _timeout = Duration(seconds: 30);
+  // ── Upload: serveurs alternatifs plus fiables que httpbin ─────────────────
+  // httpbin.org est souvent lent ou down. On essaie plusieurs endpoints.
+  static const List<String> _uploadUrls = [
+    'https://www.cloudflare.com/cdn-cgi/trace', // léger, juste pour mesure
+    'https://httpbin.org/post',
+    'https://postman-echo.com/post',
+  ];
 
-  // Ping: GET with Range header so we download only 1 byte.
-  // This avoids 405 errors from CDN servers that reject HEAD requests.
+  static const Duration _connectTimeout = Duration(seconds: 10);
+  // FIX: timeout global couvrant AUSSI la lecture du stream
+  static const Duration _streamTimeout  = Duration(seconds: 45);
+
+  // ── Ping ──────────────────────────────────────────────────────────────────
+  // GET avec Range: bytes=0-0 → on ne télécharge qu'1 octet.
+  // Évite les 405 des CDN qui rejettent HEAD.
   Future<int> testPing(int serverIndex) async {
     final server = _server(serverIndex);
     final client = http.Client();
@@ -93,71 +103,156 @@ class InternetSpeedService {
     try {
       final request = http.Request('GET', Uri.parse(server.pingUrl));
       request.headers['Range'] = 'bytes=0-0';
-      final response = await client.send(request).timeout(const Duration(seconds: 5));
+      final response = await client
+          .send(request)
+          .timeout(_connectTimeout);
       sw.stop();
-      // 206 = Partial Content (Range supported), 200 = Range ignored but alive
+      await response.stream.drain<void>(); // libère proprement la connexion
       if (response.statusCode == 200 || response.statusCode == 206) {
         return sw.elapsedMilliseconds;
       }
+      return 999;
+    } on TimeoutException {
+      sw.stop();
       return 999;
     } catch (_) {
       sw.stop();
       return 999;
     } finally {
-      client.close(); // also cancels any pending stream
+      client.close();
     }
   }
 
-  // Download: streams Mbps readings as data arrives.
-  // Stops after maxMB megabytes.
+  // ── Download ──────────────────────────────────────────────────────────────
+  // FIX principal : le timeout couvre maintenant TOUTE la durée du stream
+  // via un StreamController avec timer de garde, et non plus juste le
+  // client.send() initial (qui réussissait même sur APK sans permission).
   Stream<double> testDownloadSpeed({
     required int serverIndex,
     required int maxMB,
-  }) async* {
+  }) {
+    final controller = StreamController<double>();
+    _downloadInternal(
+      serverIndex: serverIndex,
+      maxMB: maxMB,
+      controller: controller,
+    );
+    return controller.stream;
+  }
+
+  Future<void> _downloadInternal({
+    required int serverIndex,
+    required int maxMB,
+    required StreamController<double> controller,
+  }) async {
     final server = _server(serverIndex);
     final client = http.Client();
     final sw = Stopwatch()..start();
+
+    // Watchdog : si aucun chunk n'arrive pendant 10 s → erreur réseau
+    Timer? watchdog;
+
+    void resetWatchdog() {
+      watchdog?.cancel();
+      watchdog = Timer(const Duration(seconds: 10), () {
+        if (!controller.isClosed) {
+          controller.addError(
+            TimeoutException('No data received for 10 seconds — check network'),
+          );
+          controller.close();
+          client.close();
+        }
+      });
+    }
+
     try {
       final request = http.Request('GET', Uri.parse(server.downloadUrl));
-      final response = await client.send(request).timeout(_timeout);
+      // FIX: timeout uniquement sur la connexion initiale
+      final response = await client.send(request).timeout(_connectTimeout);
 
       if (response.statusCode >= 400) {
-        throw Exception('Server returned ${response.statusCode}');
+        throw Exception(
+          'Server ${server.name} returned HTTP ${response.statusCode}',
+        );
       }
 
       int received = 0;
       final maxBytes = maxMB * 1024 * 1024;
 
-      await for (final chunk in response.stream) {
+      resetWatchdog();
+
+      await for (final chunk in response.stream
+          .timeout(_streamTimeout, onTimeout: (sink) {
+        sink.addError(TimeoutException('Stream global timeout ($_streamTimeout)'));
+        sink.close();
+      })) {
+        resetWatchdog();
         received += chunk.length;
         final secs = sw.elapsedMilliseconds / 1000.0;
-        // Skip the first 0.3s to let the connection warm up
-        if (secs > 0.3) {
-          // bytes → bits → megabits per second
-          yield (received * 8) / secs / (1024 * 1024);
+
+        // Ignore les 0.5 premières secondes (warmup TCP)
+        if (secs > 0.5) {
+          // octets → bits → mégabits/seconde
+          controller.add((received * 8) / secs / (1024 * 1024));
         }
         if (received >= maxBytes) break;
+      }
+
+      watchdog?.cancel();
+      if (!controller.isClosed) controller.close();
+    } on TimeoutException catch (e) {
+      watchdog?.cancel();
+      if (!controller.isClosed) {
+        controller.addError(e);
+        controller.close();
+      }
+    } catch (e) {
+      watchdog?.cancel();
+      if (!controller.isClosed) {
+        controller.addError(e);
+        controller.close();
       }
     } finally {
       client.close();
     }
   }
 
-  // Upload: sends a buffer and measures throughput.
-  Future<double> testUploadSpeed({int sizeMB = 4}) async {
+  // ── Upload ────────────────────────────────────────────────────────────────
+  // FIX: essaie plusieurs endpoints upload, retourne la première réponse
+  // valide. Taille réduite à 2 MB par défaut (plus rapide, assez précis).
+  Future<double> testUploadSpeed({int sizeMB = 2}) async {
+    final payload =
+        List<int>.generate(sizeMB * 1024 * 1024, (i) => i & 0xFF);
+
+    for (final url in _uploadUrls) {
+      final result = await _tryUpload(url: url, payload: payload);
+      if (result > 0) return result;
+    }
+    return 0.0;
+  }
+
+  Future<double> _tryUpload({
+    required String url,
+    required List<int> payload,
+  }) async {
     final client = http.Client();
     try {
-      final payload = List<int>.generate(sizeMB * 1024 * 1024, (i) => i & 0xFF);
       final sw = Stopwatch()..start();
-      final request = http.MultipartRequest('POST', Uri.parse(_uploadUrl))
+      final request = http.MultipartRequest('POST', Uri.parse(url))
         ..files.add(
-          http.MultipartFile.fromBytes('file', payload, filename: 'upload.bin'),
+          http.MultipartFile.fromBytes(
+            'file',
+            payload,
+            filename: 'upload.bin',
+          ),
         );
-      final response = await client.send(request).timeout(_timeout);
+      final response =
+          await client.send(request).timeout(_streamTimeout);
       sw.stop();
-      if (response.statusCode == 200) {
+      await response.stream.drain<void>();
+      if (response.statusCode == 200 || response.statusCode == 204) {
         final secs = sw.elapsedMilliseconds / 1000.0;
-        return (payload.length * 8) / secs / (1024 * 1024);
+        if (secs > 0) return (payload.length * 8) / secs / (1024 * 1024);
       }
       return 0.0;
     } catch (_) {
