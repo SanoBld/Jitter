@@ -9,6 +9,7 @@ final selectedServerNotifier  = ValueNotifier<int>(0);
 final speedUnitMbpsNotifier   = ValueNotifier<bool>(true);   // true=Mbps false=MB/s
 final autoSaveHistoryNotifier = ValueNotifier<bool>(true);
 final downloadSizeMBNotifier  = ValueNotifier<int>(100);
+final userLocationNotifier    = ValueNotifier<String>('');   // ex: "Lyon, FR"
 
 // ── Preset accent colours ──────────────────────────────────────────────────
 const List<Color> kPresetColors = [
@@ -33,6 +34,7 @@ Future<void> loadSettings() async {
   speedUnitMbpsNotifier.value   = p.getBool('pref_unit_mbps') ?? true;
   autoSaveHistoryNotifier.value = p.getBool('pref_auto_save') ?? true;
   downloadSizeMBNotifier.value  = p.getInt('pref_dl_size') ?? 100;
+  userLocationNotifier.value    = p.getString('pref_user_location') ?? '';
 }
 
 Future<SharedPreferences> get _p => SharedPreferences.getInstance();
@@ -70,4 +72,9 @@ Future<void> setAutoSave(bool v) async {
 Future<void> setDownloadSize(int mb) async {
   downloadSizeMBNotifier.value = mb;
   (await _p).setInt('pref_dl_size', mb);
+}
+
+Future<void> setUserLocation(String loc) async {
+  userLocationNotifier.value = loc;
+  (await _p).setString('pref_user_location', loc);
 }

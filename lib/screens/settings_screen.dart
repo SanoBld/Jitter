@@ -16,7 +16,12 @@ class SettingsScreen extends StatelessWidget {
             fontWeight: FontWeight.bold, letterSpacing: 1.5)),
         const SizedBox(height: 24),
 
-        _section('APPEARANCE', [
+        // ── Location ──────────────────────────────────────────────────────────
+        _section('LOCALISATION', [const _LocationTile()], t),
+        const SizedBox(height: 16),
+
+        // ── Appearance ────────────────────────────────────────────────────────
+        _section('APPARENCE', [
           const _ThemePicker(),
           const Divider(height: 1),
           const _DynamicColorTile(),
@@ -25,17 +30,20 @@ class SettingsScreen extends StatelessWidget {
         ], t),
         const SizedBox(height: 16),
 
-        _section('TEST SERVER', [const _ServerList()], t),
+        // ── Server ────────────────────────────────────────────────────────────
+        _section('SERVEUR DE TEST', [const _ServerList()], t),
         const SizedBox(height: 16),
 
-        // Durée du test avec slider personnalisable
-        _section('TEST DURATION', [const _DurationSlider()], t),
+        // ── Duration ──────────────────────────────────────────────────────────
+        _section('VOLUME DE TEST', [const _DurationSlider()], t),
         const SizedBox(height: 16),
 
-        _section('UNITS', [const _UnitPicker()], t),
+        // ── Units ─────────────────────────────────────────────────────────────
+        _section('UNITÉ', [const _UnitPicker()], t),
         const SizedBox(height: 16),
 
-        _section('HISTORY', [
+        // ── History ───────────────────────────────────────────────────────────
+        _section('HISTORIQUE', [
           const _AutoSaveTile(),
           const Divider(height: 1),
           const _ClearHistoryTile(),
@@ -50,26 +58,96 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Widget _section(String title, List<Widget> children, ThemeData t) =>
-    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(
-        padding: const EdgeInsets.only(left: 4, bottom: 8),
-        child: Text(title, style: t.textTheme.labelSmall?.copyWith(
-            color: t.colorScheme.primary,
-            fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-      ),
-      Container(
-        decoration: BoxDecoration(
-          color: t.colorScheme.onSurface.withOpacity(0.04),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-              color: t.colorScheme.onSurface.withOpacity(0.06)),
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(title, style: t.textTheme.labelSmall?.copyWith(
+              color: t.colorScheme.primary,
+              fontWeight: FontWeight.bold, letterSpacing: 1.5)),
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Column(children: children),
+        Container(
+          decoration: BoxDecoration(
+            color: t.colorScheme.onSurface.withOpacity(0.04),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: t.colorScheme.onSurface.withOpacity(0.06)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Column(children: children),
+          ),
         ),
+      ]);
+}
+
+// ── Location tile ─────────────────────────────────────────────────────────────
+class _LocationTile extends StatelessWidget {
+  const _LocationTile();
+
+  Future<void> _edit(BuildContext context) async {
+    final ctrl = TextEditingController(text: userLocationNotifier.value);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ma localisation'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+            hintText: 'Ex: Lyon, FR',
+            prefixIcon: Icon(Icons.place_outlined),
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Enregistrer'),
+          ),
+        ],
       ),
-    ]);
+    );
+    ctrl.dispose();
+    if (result != null) await setUserLocation(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return ValueListenableBuilder<String>(
+      valueListenable: userLocationNotifier,
+      builder: (_, loc, __) => ListTile(
+        leading: Container(
+          width: 38, height: 38,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: t.colorScheme.primaryContainer.withOpacity(0.5),
+          ),
+          child: Icon(Icons.place_rounded, size: 18,
+              color: t.colorScheme.primary),
+        ),
+        title: const Text('Mon lieu de test'),
+        subtitle: Text(
+          loc.isEmpty ? 'Non défini — touchez pour ajouter' : loc,
+          style: t.textTheme.bodySmall?.copyWith(
+            color: loc.isEmpty
+                ? t.colorScheme.onSurface.withOpacity(0.38)
+                : t.colorScheme.primary,
+            fontWeight: loc.isEmpty ? FontWeight.w400 : FontWeight.w600,
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+        onTap: () => _edit(context),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      ),
+    );
+  }
 }
 
 // ── Theme picker ──────────────────────────────────────────────────────────────
@@ -81,18 +159,18 @@ class _ThemePicker extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Theme', style: t.textTheme.bodyMedium
+        Text('Thème', style: t.textTheme.bodyMedium
             ?.copyWith(fontWeight: FontWeight.w500)),
         const SizedBox(height: 12),
         ValueListenableBuilder<ThemeMode>(
           valueListenable: themeModeNotifier,
           builder: (_, cur, __) => SegmentedButton<ThemeMode>(
             segments: const [
-              ButtonSegment(value: ThemeMode.system, label: Text('System'),
+              ButtonSegment(value: ThemeMode.system, label: Text('Système'),
                   icon: Icon(Icons.brightness_auto, size: 15)),
-              ButtonSegment(value: ThemeMode.light,  label: Text('Light'),
+              ButtonSegment(value: ThemeMode.light,  label: Text('Clair'),
                   icon: Icon(Icons.light_mode, size: 15)),
-              ButtonSegment(value: ThemeMode.dark,   label: Text('Dark'),
+              ButtonSegment(value: ThemeMode.dark,   label: Text('Sombre'),
                   icon: Icon(Icons.dark_mode, size: 15)),
             ],
             selected: {cur},
@@ -115,12 +193,11 @@ class _DynamicColorTile extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: useDynamicColorNotifier,
     builder: (_, v, __) => SwitchListTile(
-      title: const Text('Dynamic Color'),
-      subtitle: const Text('Follow system wallpaper color'),
+      title: const Text('Couleur dynamique'),
+      subtitle: const Text('Suit la couleur du fond d\'écran'),
       value: v,
       onChanged: setDynamicColor,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     ),
   );
 }
@@ -139,10 +216,10 @@ class _ColorPickerTile extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Accent Color', style: t.textTheme.bodyMedium
+            Text('Couleur d\'accent', style: t.textTheme.bodyMedium
                 ?.copyWith(fontWeight: FontWeight.w500)),
             const SizedBox(height: 2),
-            Text('Used when Dynamic Color is off',
+            Text('Utilisée quand la couleur dynamique est désactivée',
                 style: t.textTheme.bodySmall?.copyWith(
                     color: t.colorScheme.onSurface.withOpacity(0.5))),
             const SizedBox(height: 14),
@@ -164,9 +241,11 @@ class _ColorPickerTile extends StatelessWidget {
                           color: sel ? Colors.white : Colors.transparent,
                           width: 2.5,
                         ),
-                        boxShadow: sel ? [BoxShadow(
-                          color: c.withOpacity(0.5), blurRadius: 8, spreadRadius: 1,
-                        )] : [],
+                        boxShadow: sel
+                            ? [BoxShadow(
+                                color: c.withOpacity(0.5),
+                                blurRadius: 8, spreadRadius: 1)]
+                            : [],
                       ),
                       child: sel
                           ? const Icon(Icons.check, color: Colors.white, size: 16)
@@ -219,9 +298,6 @@ class _ServerList extends StatelessWidget {
 }
 
 // ── Duration slider ───────────────────────────────────────────────────────────
-// Remplace l'ancien SegmentedButton 3 options.
-// Valeurs disponibles : 10, 25, 50, 100, 200, 500 MB.
-// Le slider affiche une estimation de durée en secondes à 100 Mb/s.
 class _DurationSlider extends StatelessWidget {
   const _DurationSlider();
 
@@ -235,11 +311,10 @@ class _DurationSlider extends StatelessWidget {
     return closest;
   }
 
-  /// Estimation durée en secondes à 100 Mb/s
   static String _estDuration(int mb) {
-    final secs = (mb * 8) / 100; // secondes à 100 Mb/s
+    final secs = (mb * 8) / 100;
     if (secs < 60) return '~${secs.round()}s';
-    return '~${(secs / 60).toStringAsFixed(1)}min';
+    return '~${(secs / 60).toStringAsFixed(1)} min';
   }
 
   @override
@@ -254,9 +329,8 @@ class _DurationSlider extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-            // Titre + valeur courante
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('Volume de test',
+              Text('Volume de téléchargement',
                   style: t.textTheme.bodyMedium
                       ?.copyWith(fontWeight: FontWeight.w500)),
               Container(
@@ -273,21 +347,18 @@ class _DurationSlider extends StatelessWidget {
             ]),
             const SizedBox(height: 2),
 
-            // Sous-titre dynamique
             Text(
               'Durée estimée : ${_estDuration(mb)} à 100 Mb/s'
-              '  ·  Plus grand = plus précis, plus lent',
+              '  ·  Plus grand = plus précis',
               style: t.textTheme.bodySmall?.copyWith(
                   color: t.colorScheme.onSurface.withOpacity(0.5)),
             ),
             const SizedBox(height: 12),
 
-            // Slider
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 3,
-                thumbShape:
-                    const RoundSliderThumbShape(enabledThumbRadius: 8),
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
                 overlayShape:
                     const RoundSliderOverlayShape(overlayRadius: 18),
               ),
@@ -300,7 +371,6 @@ class _DurationSlider extends StatelessWidget {
               ),
             ),
 
-            // Labels sous le slider
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(
@@ -313,9 +383,7 @@ class _DurationSlider extends StatelessWidget {
                       color: selected
                           ? t.colorScheme.primary
                           : t.colorScheme.onSurface.withOpacity(0.35),
-                      fontWeight: selected
-                          ? FontWeight.bold
-                          : FontWeight.normal,
+                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
                     ),
                   );
                 }).toList(),
@@ -337,10 +405,10 @@ class _UnitPicker extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Speed unit', style: t.textTheme.bodyMedium
+        Text('Unité de vitesse', style: t.textTheme.bodyMedium
             ?.copyWith(fontWeight: FontWeight.w500)),
         const SizedBox(height: 2),
-        Text('Mbps = megabits/s  ·  MB/s = megabytes/s  (÷ 8)',
+        Text('Mbps = mégabits/s  ·  MB/s = mégaoctets/s  (÷ 8)',
             style: t.textTheme.bodySmall?.copyWith(
                 color: t.colorScheme.onSurface.withOpacity(0.5))),
         const SizedBox(height: 12),
@@ -371,12 +439,11 @@ class _AutoSaveTile extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: autoSaveHistoryNotifier,
     builder: (_, v, __) => SwitchListTile(
-      title: const Text('Auto-save results'),
-      subtitle: const Text('Save each completed test to Logs'),
+      title: const Text('Sauvegarde auto'),
+      subtitle: const Text('Enregistrer chaque test dans les logs'),
       value: v,
       onChanged: setAutoSave,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     ),
   );
 }
@@ -389,24 +456,26 @@ class _ClearHistoryTile extends StatelessWidget {
     final t = Theme.of(context);
     return ListTile(
       leading: Icon(Icons.delete_sweep_outlined, color: t.colorScheme.error),
-      title: Text('Clear all logs',
+      title: Text('Effacer tous les logs',
           style: TextStyle(color: t.colorScheme.error)),
-      subtitle: Text('Permanently delete saved test results',
+      subtitle: Text('Supprimer définitivement tous les résultats enregistrés',
           style: t.textTheme.bodySmall?.copyWith(
               color: t.colorScheme.onSurface.withOpacity(0.5))),
       onTap: () async {
         final ok = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Clear logs'),
+            title: const Text('Effacer les logs'),
             content: const Text(
-                'Delete all saved test results? This cannot be undone.'),
+                'Supprimer tous les résultats ? Action irréversible.'),
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Cancel')),
-              TextButton(onPressed: () => Navigator.pop(ctx, true),
-                  child: Text('Delete all',
-                      style: TextStyle(color: t.colorScheme.error))),
+                  child: const Text('Annuler')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text('Supprimer',
+                    style: TextStyle(color: t.colorScheme.error)),
+              ),
             ],
           ),
         );
@@ -415,8 +484,7 @@ class _ClearHistoryTile extends StatelessWidget {
           await prefs.remove('speed_history');
         }
       },
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     );
   }
 }

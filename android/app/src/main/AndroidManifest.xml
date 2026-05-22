@@ -1,22 +1,13 @@
-<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- ══════════════════════════════════════════════════════════
-         PERMISSION INTERNET — obligatoire pour tout accès réseau.
-         Sans cette ligne, toutes les requêtes http échouent
-         silencieusement sur APK (aucune exception levée dans le
-         debug, juste un timeout ou une fermeture immédiate).
-    ══════════════════════════════════════════════════════════ -->
-    <uses-permission android:name="android.permission.INTERNET" />
-
-    <!-- Optionnel mais recommandé : permet de détecter l'état du réseau -->
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- REQUIRED: accès réseau pour les tests de débit -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
     <application
-        android:label="jitter"
+        android:label="Jitter"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="false">
 
         <activity
@@ -29,9 +20,10 @@
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
 
+            <!-- Splash screen -->
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
-                android:resource="@style/NormalTheme" />
+                android:resource="@style/NormalTheme"/>
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -39,16 +31,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Flutter deferred components -->
         <meta-data
             android:name="flutterEmbedding"
-            android:value="2" />
+            android:value="2"/>
     </application>
 
-    <!-- Nécessaire pour les appareils Android 12+ (API 31+) -->
+    <!-- Requis pour targetSdk 31+ (Android 12+) -->
     <queries>
         <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="https" />
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
         </intent>
     </queries>
 </manifest>
