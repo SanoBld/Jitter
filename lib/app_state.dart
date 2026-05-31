@@ -11,6 +11,7 @@ final autoSaveHistoryNotifier  = ValueNotifier<bool>(true);
 final testDurationSecsNotifier = ValueNotifier<int>(15);      // test duration in seconds
 final userLocationNotifier     = ValueNotifier<String>('');   // auto-detected city, e.g. "Lyon, FR"
 final ispNameNotifier          = ValueNotifier<String>('');   // auto-detected ISP name
+final locationFetchingNotifier = ValueNotifier<bool>(false);  // true while detecting location
 
 // ── Preset accent colors ───────────────────────────────────────────────────
 const List<Color> kPresetColors = [
@@ -72,19 +73,16 @@ Future<void> setAutoSave(bool v) async {
   (await _p).setBool('pref_auto_save', v);
 }
 
-// Save the test duration (in seconds)
 Future<void> setTestDuration(int secs) async {
   testDurationSecsNotifier.value = secs;
   (await _p).setInt('pref_test_duration_secs', secs);
 }
 
-// Save the auto-detected location string
 Future<void> setUserLocation(String loc) async {
   userLocationNotifier.value = loc;
   (await _p).setString('pref_user_location', loc);
 }
 
-// Save the auto-detected ISP name
 Future<void> setIspName(String name) async {
   ispNameNotifier.value = name;
   (await _p).setString('pref_isp_name', name);

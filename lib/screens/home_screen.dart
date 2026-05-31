@@ -8,18 +8,18 @@ import '../app_state.dart';
 import '../services/internet_speed_service.dart';
 import 'settings_screen.dart';
 
-// ─── Performance grade ────────────────────────────────────────────────────────
+// ─── Performance grade ─────────────────────────────────────────────────────
 enum _PerfGrade { excellent, veryGood, good, fair, slow, poor }
 
 extension _PerfGradeX on _PerfGrade {
   String get label {
     switch (this) {
       case _PerfGrade.excellent: return 'EXCELLENT';
-      case _PerfGrade.veryGood:  return 'TRÈS BON';
-      case _PerfGrade.good:      return 'BON';
-      case _PerfGrade.fair:      return 'MOYEN';
-      case _PerfGrade.slow:      return 'LENT';
-      case _PerfGrade.poor:      return 'TRÈS LENT';
+      case _PerfGrade.veryGood:  return 'VERY GOOD';
+      case _PerfGrade.good:      return 'GOOD';
+      case _PerfGrade.fair:      return 'FAIR';
+      case _PerfGrade.slow:      return 'SLOW';
+      case _PerfGrade.poor:      return 'VERY SLOW';
     }
   }
 
@@ -73,18 +73,18 @@ Color _jitterColorFor(int ms, BuildContext context) {
   return Theme.of(context).colorScheme.error;
 }
 
-// ─── Log entry — one result saved to history ──────────────────────────────────
+// ─── Log entry — one result saved to history ──────────────────────────────
 class _LogEntry {
   final String timestamp;
   final String flag;
   final String server;
   final String provider;
   final String serverLocation;
-  final String userLocation;   // auto-detected city where the user ran the test
+  final String userLocation;
   final double dl;
   final double ul;
   final int    ping;
-  final int    jitter;         // ping variation in ms
+  final int    jitter;
   final String unit;
 
   const _LogEntry({
@@ -125,11 +125,10 @@ class _LogEntry {
     dl:             (j['dl']   as num).toDouble(),
     ul:             (j['ul']   as num).toDouble(),
     ping:           j['ping']         as int,
-    jitter:         j['jitter']       as int? ?? 0,  // default 0 for old entries
+    jitter:         j['jitter']       as int? ?? 0,
     unit:           j['unit']         as String,
   );
 
-  // Try to read entries written by older versions of the app
   static _LogEntry? tryFromLegacyString(String raw) {
     try {
       final parts = raw.split('  |  ');
@@ -162,17 +161,15 @@ class _LogEntry {
   }
 }
 
-// Helper to pair a log entry with its index in the full list
 class _IndexedEntry {
   final _LogEntry entry;
   final int index;
   const _IndexedEntry(this.entry, this.index);
 }
 
-// Duration options shown as chips (in seconds)
 const _kDurationSteps = [5, 10, 15, 20, 30, 60];
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -185,7 +182,6 @@ class _HomeScreenState extends State<HomeScreen>
   final _svc = InternetSpeedService();
   int _tabIndex = 0;
 
-  // Live value notifiers — updated during the test
   final _speedNf    = ValueNotifier<double>(0.0);
   final _pingNf     = ValueNotifier<int>(0);
   final _jitterNf   = ValueNotifier<int>(0);
@@ -208,7 +204,6 @@ class _HomeScreenState extends State<HomeScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
-    // Auto-detect location when the app opens
     _fetchAndUpdateLocation();
   }
 
@@ -228,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  // ── Load / save history ─────────────────────────────────────────────────────
+  // ── Load / save history ────────────────────────────────────────────────
   Future<void> _loadHistory() async {
     final p   = await SharedPreferences.getInstance();
     final raw = p.getStringList('speed_history') ?? [];
@@ -263,17 +258,21 @@ class _HomeScreenState extends State<HomeScreen>
     await p.remove('speed_history');
   }
 
-  // ── Auto-detect location + ISP from the public IP ───────────────────────────
+  // ── Auto-detect location + ISP ────────────────────────────────────────
   Future<void> _fetchAndUpdateLocation() async {
-    final info = await InternetSpeedService.getLocationAndIsp();
-    if (info.location.isNotEmpty) await setUserLocation(info.location);
-    if (info.isp.isNotEmpty)      await setIspName(info.isp);
+    locationFetchingNotifier.value = true;
+    try {
+      final info = await InternetSpeedService.getLocationAndIsp();
+      if (info.location.isNotEmpty) await setUserLocation(info.location);
+      if (info.isp.isNotEmpty)      await setIspName(info.isp);
+    } finally {
+      locationFetchingNotifier.value = false;
+    }
   }
 
-  // ── Unit helper ─────────────────────────────────────────────────────────────
   String get _unit => speedUnitMbpsNotifier.value ? 'Mb/s' : 'MB/s';
 
-  // ── Run full speed test ─────────────────────────────────────────────────────
+  // ── Run full speed test ────────────────────────────────────────────────
   Future<void> _runTest() async {
     _testingNf.value  = true;
     _errorNf.value    = null;
@@ -287,27 +286,26 @@ class _HomeScreenState extends State<HomeScreen>
     _phaseNf.value    = 'LOCATING';
 
     try {
-      // 1. Refresh location + ISP at the start of each test
+      // 1. Refresh location + ISP
       await _fetchAndUpdateLocation();
       _progressNf.value = 0.04;
 
-      // 2. Resolve the right server for this platform
+      // 2. Resolve server
       final rawIdx = selectedServerNotifier.value;
       final srv    = InternetSpeedService.resolveServerIndex(rawIdx);
+      final durSecs = testDurationSecsNotifier.value;
 
-      // 3. Ping + jitter (5 pings)
+      // 3. Ping + jitter
       _phaseNf.value = 'PING';
       final pingResult  = await _svc.testPingWithJitter(srv);
       _pingNf.value     = pingResult.ping;
       _jitterNf.value   = pingResult.jitter;
       _progressNf.value = 0.20;
 
-      // 4. Download — runs for the user-chosen duration in seconds
-      final durSecs = testDurationSecsNotifier.value;
+      // 4. Download
       _phaseNf.value    = 'DOWNLOAD';
       _pointsNf.value   = [];
 
-      // Update the progress bar smoothly during download
       final dlStart   = DateTime.now();
       Timer? progTimer;
       progTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
@@ -325,20 +323,34 @@ class _HomeScreenState extends State<HomeScreen>
         _pointsNf.value = pts;
       }
       progTimer?.cancel();
-
       _progressNf.value = 0.70;
-      _pointsNf.value   = [];
 
-      // 5. Upload
-      _phaseNf.value = 'UPLOAD';
-      final ul          = await _svc.testUploadSpeed();
-      _speedNf.value    = ul;
-      _ulNf.value       = ul;
-      _pointsNf.value   = [ul * 0.3, ul * 0.55, ul * 0.8, ul];
+      // 5. Upload — streaming, just like download
+      _phaseNf.value  = 'UPLOAD';
+      _speedNf.value  = 0;
+      _pointsNf.value = [];
+
+      final ulStart = DateTime.now();
+      Timer? ulProgTimer;
+      ulProgTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
+        final elapsed = DateTime.now().difference(ulStart).inMilliseconds;
+        _progressNf.value =
+            (0.70 + 0.30 * (elapsed / (durSecs * 1000))).clamp(0.70, 1.0);
+      });
+
+      await for (final mbps
+          in _svc.testUploadSpeed(durationSecs: durSecs)) {
+        _speedNf.value = mbps;
+        _ulNf.value    = mbps;
+        final pts = List<double>.from(_pointsNf.value)..add(mbps);
+        if (pts.length > 60) pts.removeAt(0);
+        _pointsNf.value = pts;
+      }
+      ulProgTimer?.cancel();
       _progressNf.value = 1.0;
       _phaseNf.value    = 'COMPLETED';
 
-      // 6. Save result to history
+      // 6. Save result
       if (autoSaveHistoryNotifier.value) {
         final server = InternetSpeedService.servers[srv];
         final entry  = _LogEntry(
@@ -366,25 +378,24 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // Turn raw error strings into readable messages
   String _friendlyError(String raw) {
     if (raw.contains('Failed to fetch') || raw.contains('CORS') ||
         raw.contains('cross-origin') || raw.contains('XMLHttpRequest'))
-      return 'Erreur CORS — ce serveur bloque les requêtes navigateur.\n'
-          'Utilisez un serveur Cloudflare ou lancez l\'APK Android.';
+      return 'CORS error — this server blocks browser requests.\n'
+          'Use a Cloudflare server or run the Android APK.';
     if (raw.contains('Permission denied') || raw.contains('INTERNET'))
-      return 'Permission réseau manquante.\nVérifiez AndroidManifest.xml.';
+      return 'Missing network permission.\nCheck AndroidManifest.xml.';
     if (raw.contains('Failed host lookup') || raw.contains('No address'))
-      return 'Impossible de résoudre le serveur.\nVérifiez votre connexion.';
-    if (raw.contains('SocketException')) return 'Pas de connexion internet.';
+      return 'Cannot resolve server.\nCheck your connection.';
+    if (raw.contains('SocketException')) return 'No internet connection.';
     if (raw.contains('timeout') || raw.contains('TimeoutException'))
-      return 'Timeout — le serveur ne répond pas.\nEssayez un autre serveur.';
+      return 'Timeout — server not responding.\nTry a different server.';
     if (raw.contains('HandshakeException'))
-      return 'Erreur SSL — vérifiez la date/heure de l\'appareil.';
-    return 'Erreur : $raw';
+      return 'SSL error — check your device date/time.';
+    return 'Error: $raw';
   }
 
-  // ── Root build ──────────────────────────────────────────────────────────────
+  // ── Root build ─────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -456,7 +467,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Top bar — app name, auto location chip, status badge ───────────────────
+  // ── Top bar — app name, location chip, status badge ────────────────────
   Widget _buildTopBar(ThemeData t) {
     return Row(children: [
       Text('JITTER', style: t.textTheme.titleSmall?.copyWith(
@@ -466,47 +477,67 @@ class _HomeScreenState extends State<HomeScreen>
       )),
       const Spacer(),
 
-      // Location chip — tapping it refreshes the auto-detection
-      ValueListenableBuilder<String>(
-        valueListenable: userLocationNotifier,
-        builder: (_, loc, __) => ValueListenableBuilder<String>(
-          valueListenable: ispNameNotifier,
-          builder: (_, isp, __) => GestureDetector(
-            onTap: _fetchAndUpdateLocation,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: t.colorScheme.secondaryContainer.withOpacity(0.45),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                    color: t.colorScheme.secondary.withOpacity(0.22)),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.place_rounded, size: 12,
-                    color: t.colorScheme.secondary),
-                const SizedBox(width: 4),
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(
-                    loc.isEmpty ? 'Détection…' : loc,
-                    style: t.textTheme.labelSmall?.copyWith(
-                      color: loc.isEmpty
-                          ? t.colorScheme.onSurface.withOpacity(0.38)
-                          : t.colorScheme.onSecondaryContainer,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 11,
-                    ),
+      // Location chip — tapping it re-fetches location + ISP
+      ValueListenableBuilder<bool>(
+        valueListenable: locationFetchingNotifier,
+        builder: (_, fetching, __) => ValueListenableBuilder<String>(
+          valueListenable: userLocationNotifier,
+          builder: (_, loc, __) => ValueListenableBuilder<String>(
+            valueListenable: ispNameNotifier,
+            builder: (_, isp, __) => GestureDetector(
+              onTap: fetching ? null : _fetchAndUpdateLocation,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: fetching
+                      ? t.colorScheme.secondaryContainer.withOpacity(0.28)
+                      : t.colorScheme.secondaryContainer.withOpacity(0.45),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: t.colorScheme.secondary.withOpacity(0.22)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  // Spinner when fetching, pin icon otherwise
+                  SizedBox(
+                    width: 12, height: 12,
+                    child: fetching
+                        ? CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            color: t.colorScheme.secondary,
+                          )
+                        : Icon(Icons.place_rounded, size: 12,
+                            color: t.colorScheme.secondary),
                   ),
-                  if (isp.isNotEmpty)
-                    Text(isp,
-                        style: t.textTheme.labelSmall?.copyWith(
-                          fontSize: 9,
-                          color: t.colorScheme.onSurface.withOpacity(0.4),
-                        )),
+                  const SizedBox(width: 4),
+                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(
+                      fetching
+                          ? 'Detecting…'
+                          : loc.isEmpty
+                              ? 'Unknown location'
+                              : loc,
+                      style: t.textTheme.labelSmall?.copyWith(
+                        color: (fetching || loc.isEmpty)
+                            ? t.colorScheme.onSurface.withOpacity(0.38)
+                            : t.colorScheme.onSecondaryContainer,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
+                    ),
+                    if (isp.isNotEmpty && !fetching)
+                      Text(isp,
+                          style: t.textTheme.labelSmall?.copyWith(
+                            fontSize: 9,
+                            color: t.colorScheme.onSurface.withOpacity(0.4),
+                          )),
+                  ]),
+                  const SizedBox(width: 3),
+                  if (!fetching)
+                    Icon(Icons.refresh_rounded, size: 10,
+                        color: t.colorScheme.onSurface.withOpacity(0.28)),
                 ]),
-                const SizedBox(width: 3),
-                Icon(Icons.refresh_rounded, size: 10,
-                    color: t.colorScheme.onSurface.withOpacity(0.28)),
-              ]),
+              ),
             ),
           ),
         ),
@@ -553,7 +584,7 @@ class _HomeScreenState extends State<HomeScreen>
     ]);
   }
 
-  // ── Gauge — arc + center speed display ─────────────────────────────────────
+  // ── Gauge — arc + center speed display ─────────────────────────────────
   Widget _buildGaugeArea(ThemeData t) {
     return Center(
       child: LayoutBuilder(builder: (_, box) {
@@ -565,7 +596,6 @@ class _HomeScreenState extends State<HomeScreen>
             builder: (_, isMbps, __) {
               final displayVal = isMbps ? mbps : mbps / 8;
               return Stack(alignment: Alignment.center, children: [
-                // Arc gauge ring
                 SizedBox(
                   width: size, height: size,
                   child: TweenAnimationBuilder<double>(
@@ -582,7 +612,6 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 ),
-                // Center: speed number + unit + server + ISP
                 Column(mainAxisSize: MainAxisSize.min, children: [
                   TweenAnimationBuilder<double>(
                     tween: Tween(begin: 0.0, end: displayVal),
@@ -606,7 +635,6 @@ class _HomeScreenState extends State<HomeScreen>
                         letterSpacing: 1.5,
                       )),
                   const SizedBox(height: 8),
-                  // Server chip
                   ValueListenableBuilder<int>(
                     valueListenable: selectedServerNotifier,
                     builder: (_, si, __) {
@@ -629,7 +657,6 @@ class _HomeScreenState extends State<HomeScreen>
                       );
                     },
                   ),
-                  // ISP chip — shown when we have ISP info
                   const SizedBox(height: 4),
                   ValueListenableBuilder<String>(
                     valueListenable: ispNameNotifier,
@@ -653,7 +680,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Phase pills — PING / DOWNLOAD / UPLOAD ──────────────────────────────────
+  // ── Phase pills — PING / DOWNLOAD / UPLOAD ──────────────────────────────
   Widget _buildPhasePills(ThemeData t) {
     const phases = ['PING', 'DOWNLOAD', 'UPLOAD'];
     return ValueListenableBuilder<String>(
@@ -708,7 +735,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Progress bar ─────────────────────────────────────────────────────────────
+  // ── Progress bar ──────────────────────────────────────────────────────────
   Widget _buildProgressBar(ThemeData t) {
     return ValueListenableBuilder<double>(
       valueListenable: _progressNf,
@@ -729,26 +756,32 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Live speed chart ──────────────────────────────────────────────────────────
+  // ── Live speed chart ──────────────────────────────────────────────────────
   Widget _buildLiveChart(ThemeData t) {
     return SizedBox(
       height: 46,
       child: ValueListenableBuilder<List<double>>(
         valueListenable: _pointsNf,
-        builder: (_, pts, __) => ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: CustomPaint(
-            painter: _ChartPainter(
-              points: pts,
-              color:  t.colorScheme.primary,
-            ),
-          ),
+        builder: (_, pts, __) => ValueListenableBuilder<String>(
+          valueListenable: _phaseNf,
+          builder: (_, phase, __) {
+            // Use secondary color for upload phase
+            final color = phase == 'UPLOAD'
+                ? t.colorScheme.secondary
+                : t.colorScheme.primary;
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: CustomPaint(
+                painter: _ChartPainter(points: pts, color: color),
+              ),
+            );
+          },
         ),
       ),
     );
   }
 
-  // ── Stats row — DL / UL / PING / JITTER ──────────────────────────────────────
+  // ── Stats row — DL / UL / PING / JITTER ──────────────────────────────────
   Widget _buildStatsRow(ThemeData t) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -827,7 +860,7 @@ class _HomeScreenState extends State<HomeScreen>
 
           _vDivider(t),
 
-          // Jitter — the app's namesake metric!
+          // Jitter
           _statBlock(
             icon:      Icons.waves_rounded,
             label:     'JITTER',
@@ -874,14 +907,14 @@ class _HomeScreenState extends State<HomeScreen>
     color: t.colorScheme.onSurface.withOpacity(0.07),
   );
 
-  // ── Duration chips — time in seconds ─────────────────────────────────────────
+  // ── Duration chips ────────────────────────────────────────────────────────
   Widget _buildDurationChips(ThemeData t) {
     return ValueListenableBuilder<int>(
       valueListenable: testDurationSecsNotifier,
       builder: (_, cur, __) => ValueListenableBuilder<bool>(
         valueListenable: _testingNf,
         builder: (_, testing, __) => Row(children: [
-          Text('Durée :', style: t.textTheme.labelSmall?.copyWith(
+          Text('Duration:', style: t.textTheme.labelSmall?.copyWith(
             color:      t.colorScheme.onSurface.withOpacity(0.4),
             fontWeight: FontWeight.w500,
           )),
@@ -934,7 +967,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Start button ──────────────────────────────────────────────────────────────
+  // ── Start button ──────────────────────────────────────────────────────────
   Widget _buildStartButton(ThemeData t) {
     return ValueListenableBuilder<bool>(
       valueListenable: _testingNf,
@@ -961,7 +994,7 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Text('TEST EN COURS…', style: TextStyle(
+                  Text('TESTING…', style: TextStyle(
                     fontWeight:    FontWeight.bold,
                     letterSpacing: 2.0,
                     color: t.colorScheme.onSurface.withOpacity(0.25),
@@ -975,7 +1008,7 @@ class _HomeScreenState extends State<HomeScreen>
                       borderRadius: BorderRadius.circular(100)),
                   backgroundColor: t.colorScheme.primary,
                 ),
-                child: const Text('LANCER LE TEST', style: TextStyle(
+                child: const Text('START TEST', style: TextStyle(
                   fontWeight:    FontWeight.bold,
                   letterSpacing: 2.0,
                 )),
@@ -984,7 +1017,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Web mode banner ───────────────────────────────────────────────────────────
+  // ── Web mode banner ───────────────────────────────────────────────────────
   Widget _webBanner(ThemeData t) => Container(
     margin:  const EdgeInsets.only(bottom: 6),
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
@@ -997,14 +1030,14 @@ class _HomeScreenState extends State<HomeScreen>
       Icon(Icons.public_rounded, size: 15, color: t.colorScheme.tertiary),
       const SizedBox(width: 8),
       Expanded(child: Text(
-        'Mode navigateur — seuls les serveurs Cloudflare sont disponibles.',
+        'Browser mode — only Cloudflare servers are available.',
         style: t.textTheme.labelSmall?.copyWith(
             color: t.colorScheme.onTertiaryContainer, height: 1.4),
       )),
     ]),
   );
 
-  // ── Error banner ──────────────────────────────────────────────────────────────
+  // ── Error banner ──────────────────────────────────────────────────────────
   Widget _errorBanner(ThemeData t) => ValueListenableBuilder<String?>(
     valueListenable: _errorNf,
     builder: (_, err, __) {
@@ -1028,14 +1061,13 @@ class _HomeScreenState extends State<HomeScreen>
   );
 
   // ══════════════════════════════════════════════════════════════════════════
-  // HISTORY TAB — grouped by detected user location
+  // HISTORY TAB
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildHistory(ThemeData t) {
-    // Group entries by userLocation in insertion order (most recent first)
     final grouped = <String, List<_IndexedEntry>>{};
     for (int i = 0; i < _history.length; i++) {
       final loc = _history[i].userLocation.isEmpty
-          ? '📍 Lieu inconnu'
+          ? '📍 Unknown location'
           : _history[i].userLocation;
       grouped.putIfAbsent(loc, () => []).add(_IndexedEntry(_history[i], i));
     }
@@ -1043,7 +1075,6 @@ class _HomeScreenState extends State<HomeScreen>
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Header row
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('METRICS LOGS', style: t.textTheme.titleMedium?.copyWith(
@@ -1051,7 +1082,7 @@ class _HomeScreenState extends State<HomeScreen>
             if (_history.isNotEmpty)
               Text(
                 '${_history.length} test${_history.length > 1 ? 's' : ''}'
-                '  ·  ${grouped.length} lieu${grouped.length > 1 ? 'x' : ''}',
+                '  ·  ${grouped.length} location${grouped.length > 1 ? 's' : ''}',
                 style: t.textTheme.bodySmall?.copyWith(
                     color: t.colorScheme.onSurface.withOpacity(0.4))),
           ]),
@@ -1059,7 +1090,7 @@ class _HomeScreenState extends State<HomeScreen>
             TextButton.icon(
               onPressed: _confirmClearHistory,
               icon:  const Icon(Icons.delete_sweep_outlined, size: 16),
-              label: const Text('Tout effacer'),
+              label: const Text('Clear all'),
               style: TextButton.styleFrom(
                 foregroundColor: t.colorScheme.error,
                 visualDensity:   VisualDensity.compact,
@@ -1084,7 +1115,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // Location group header + list of cards
   Widget _buildLocationGroup(
       String location, List<_IndexedEntry> entries, ThemeData t) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1144,12 +1174,12 @@ class _HomeScreenState extends State<HomeScreen>
             color: t.colorScheme.onSurface.withOpacity(0.22)),
       ),
       const SizedBox(height: 16),
-      Text('Aucun test enregistré',
+      Text('No tests recorded',
           style: t.textTheme.bodyMedium?.copyWith(
               color:      t.colorScheme.onSurface.withOpacity(0.4),
               fontWeight: FontWeight.w500)),
       const SizedBox(height: 4),
-      Text('Lancez un test pour voir les résultats ici.',
+      Text('Run a test to see results here.',
           style: t.textTheme.bodySmall?.copyWith(
               color: t.colorScheme.onSurface.withOpacity(0.27))),
     ]),
@@ -1160,16 +1190,16 @@ class _HomeScreenState extends State<HomeScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title:   const Text('Effacer les logs'),
-        content: const Text('Supprimer tous les résultats ? Action irréversible.'),
+        title:   const Text('Clear logs'),
+        content: const Text('Delete all results? This cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Annuler'),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Supprimer',
+            child: Text('Delete',
                 style: TextStyle(color: t.colorScheme.error)),
           ),
         ],
@@ -1178,12 +1208,12 @@ class _HomeScreenState extends State<HomeScreen>
     if (ok == true) await _clearHistory();
   }
 
-  // ── Date formatting helpers ───────────────────────────────────────────────────
+  // ── Date helpers ──────────────────────────────────────────────────────────
   static String _fmtDate(String ts) {
     try {
       final d = DateTime.parse(ts.length == 16 ? '${ts}:00' : ts);
-      const months = ['jan', 'fév', 'mar', 'avr', 'mai', 'jun',
-                      'jul', 'aoû', 'sep', 'oct', 'nov', 'déc'];
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       return '${d.day} ${months[d.month - 1]}. ${d.year}';
     } catch (_) {
       return ts.substring(0, min(10, ts.length));
@@ -1199,7 +1229,6 @@ class _HomeScreenState extends State<HomeScreen>
 // REUSABLE WIDGETS
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ─── Speed text — big number + small unit ────────────────────────────────────
 class _SpeedText extends StatelessWidget {
   final String value;
   final String unit;
@@ -1209,16 +1238,16 @@ class _SpeedText extends StatelessWidget {
     required this.value, required this.unit,
     required this.color, required this.t,
   });
+
   @override
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.baseline,
     textBaseline: TextBaseline.alphabetic,
     children: [
-      Text(value, style: t.textTheme.titleMedium?.copyWith(
+      Text(value, style: t.textTheme.bodyMedium?.copyWith(
         color:        color,
         fontWeight:   FontWeight.w800,
-        height:       1.0,
         fontFeatures: const [FontFeature.tabularFigures()],
       )),
       const SizedBox(width: 2),
@@ -1270,7 +1299,7 @@ class _LogCard extends StatelessWidget {
         ),
         child: Column(children: [
 
-          // ── Performance banner ──────────────────────────────────────────────
+          // ── Performance banner ────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
             decoration: BoxDecoration(
@@ -1286,7 +1315,6 @@ class _LogCard extends StatelessWidget {
                 letterSpacing: 1.0,
               )),
               const Spacer(),
-              // Mini speed bar
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 SizedBox(
                   width: 64, height: 4,
@@ -1314,7 +1342,7 @@ class _LogCard extends StatelessWidget {
             ]),
           ),
 
-          // ── Server header ───────────────────────────────────────────────────
+          // ── Server header ─────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
             child: Row(children: [
@@ -1379,7 +1407,7 @@ class _LogCard extends StatelessWidget {
           const SizedBox(height: 10),
           Divider(height: 1, color: t.colorScheme.onSurface.withOpacity(0.06)),
 
-          // ── Metrics row — DL / UL / PING / JITTER ───────────────────────────
+          // ── Metrics row ───────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
             child: Row(children: [
@@ -1399,7 +1427,6 @@ class _LogCard extends StatelessWidget {
                 color: Theme.of(context).colorScheme.secondary,
               ),
               const Spacer(),
-              // Ping pill
               _PingJitterPill(
                 icon:  Icons.network_ping_rounded,
                 label: 'PING',
@@ -1408,7 +1435,6 @@ class _LogCard extends StatelessWidget {
                 t:     t,
               ),
               const SizedBox(width: 6),
-              // Jitter pill
               _PingJitterPill(
                 icon:  Icons.waves_rounded,
                 label: 'JITTER',
@@ -1435,8 +1461,8 @@ class _LogCard extends StatelessWidget {
   static String _fmtDate(String ts) {
     try {
       final d = DateTime.parse(ts.length == 16 ? '${ts}:00' : ts);
-      const months = ['jan', 'fév', 'mar', 'avr', 'mai', 'jun',
-                      'jul', 'aoû', 'sep', 'oct', 'nov', 'déc'];
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       return '${d.day} ${months[d.month - 1]}. ${d.year}';
     } catch (_) {
       return ts.substring(0, min(10, ts.length));
@@ -1448,7 +1474,7 @@ class _LogCard extends StatelessWidget {
   }
 }
 
-// ─── Ping / Jitter pill widget ────────────────────────────────────────────────
+// ─── Ping / Jitter pill widget ─────────────────────────────────────────────
 class _PingJitterPill extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1486,7 +1512,7 @@ class _PingJitterPill extends StatelessWidget {
   );
 }
 
-// ─── Metric chip — DL / UL display ───────────────────────────────────────────
+// ─── Metric chip — DL / UL display ────────────────────────────────────────
 class _MetricChip extends StatelessWidget {
   final IconData icon;
   final String value, unit, label;
@@ -1525,7 +1551,7 @@ class _MetricChip extends StatelessWidget {
   }
 }
 
-// ─── Arc gauge painter ────────────────────────────────────────────────────────
+// ─── Arc gauge painter ─────────────────────────────────────────────────────
 class _ArcGaugePainter extends CustomPainter {
   final double speedMbps;
   final double maxSpeedMbps;
@@ -1553,7 +1579,6 @@ class _ArcGaugePainter extends CustomPainter {
     const sweepRad = _sweepDeg * pi / 180;
     const strokeW  = 16.0;
 
-    // Background track
     canvas.drawArc(rect, startRad, sweepRad, false,
       Paint()
         ..color       = trackColor
@@ -1565,7 +1590,6 @@ class _ArcGaugePainter extends CustomPainter {
     final progress = (speedMbps / maxSpeedMbps).clamp(0.0, 1.0);
     if (progress < 0.001) return;
 
-    // Colored arc with gradient
     final (Color c1, Color c2) = _speedColors(speedMbps);
     final sweepActual = sweepRad * progress;
 
@@ -1582,7 +1606,6 @@ class _ArcGaugePainter extends CustomPainter {
         ).createShader(rect),
     );
 
-    // Thumb dot at the tip of the arc
     final endAngle = startRad + sweepActual;
     final dx = cx + radius * cos(endAngle);
     final dy = cy + radius * sin(endAngle);
@@ -1594,7 +1617,6 @@ class _ArcGaugePainter extends CustomPainter {
           ..style       = PaintingStyle.stroke
           ..strokeWidth = 2.5);
 
-    // Tick marks
     final tickPaint = Paint()
       ..color       = trackColor.withOpacity(0.8)
       ..strokeWidth = 1.5
@@ -1624,7 +1646,7 @@ class _ArcGaugePainter extends CustomPainter {
       old.speedMbps != speedMbps || old.accentColor != accentColor;
 }
 
-// ─── Live speed chart painter ─────────────────────────────────────────────────
+// ─── Live speed chart painter ──────────────────────────────────────────────
 class _ChartPainter extends CustomPainter {
   final List<double> points;
   final Color color;
