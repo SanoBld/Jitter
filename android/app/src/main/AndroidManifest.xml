@@ -1,8 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- REQUIRED: accès réseau pour les tests de débit -->
+    <!-- Network access for speed tests -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- Location — used to auto-detect the city when running a test -->
+    <!-- ACCESS_COARSE_LOCATION is enough; we only need city-level precision -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
     <application
         android:label="Jitter"
@@ -31,13 +35,13 @@
             </intent-filter>
         </activity>
 
-        <!-- Flutter deferred components -->
+        <!-- Flutter embedding version -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>
     </application>
 
-    <!-- Requis pour targetSdk 31+ (Android 12+) -->
+    <!-- Needed for targetSdk 31+ (Android 12+) -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>

@@ -16,11 +16,11 @@ class SettingsScreen extends StatelessWidget {
             fontWeight: FontWeight.bold, letterSpacing: 1.5)),
         const SizedBox(height: 24),
 
-        // ── Location ──────────────────────────────────────────────────────────
+        // ── Location (auto) ────────────────────────────────────────────────
         _section('LOCALISATION', [const _LocationTile()], t),
         const SizedBox(height: 16),
 
-        // ── Appearance ────────────────────────────────────────────────────────
+        // ── Appearance ─────────────────────────────────────────────────────
         _section('APPARENCE', [
           const _ThemePicker(),
           const Divider(height: 1),
@@ -30,19 +30,19 @@ class SettingsScreen extends StatelessWidget {
         ], t),
         const SizedBox(height: 16),
 
-        // ── Server ────────────────────────────────────────────────────────────
+        // ── Test server ────────────────────────────────────────────────────
         _section('SERVEUR DE TEST', [const _ServerList()], t),
         const SizedBox(height: 16),
 
-        // ── Duration ──────────────────────────────────────────────────────────
-        _section('VOLUME DE TEST', [const _DurationSlider()], t),
+        // ── Test duration in seconds ───────────────────────────────────────
+        _section('DURÉE DU TEST', [const _DurationSlider()], t),
         const SizedBox(height: 16),
 
-        // ── Units ─────────────────────────────────────────────────────────────
+        // ── Speed unit ─────────────────────────────────────────────────────
         _section('UNITÉ', [const _UnitPicker()], t),
         const SizedBox(height: 16),
 
-        // ── History ───────────────────────────────────────────────────────────
+        // ── History ────────────────────────────────────────────────────────
         _section('HISTORIQUE', [
           const _AutoSaveTile(),
           const Divider(height: 1),
@@ -62,12 +62,13 @@ class SettingsScreen extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 8),
           child: Text(title, style: t.textTheme.labelSmall?.copyWith(
-              color: t.colorScheme.primary,
-              fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+              color:      t.colorScheme.primary,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5)),
         ),
         Container(
           decoration: BoxDecoration(
-            color: t.colorScheme.onSurface.withOpacity(0.04),
+            color:        t.colorScheme.onSurface.withOpacity(0.04),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
                 color: t.colorScheme.onSurface.withOpacity(0.06)),
@@ -80,41 +81,15 @@ class SettingsScreen extends StatelessWidget {
       ]);
 }
 
-// ── Location tile ─────────────────────────────────────────────────────────────
+// ── Location tile — shows the auto-detected city + ISP, tap to refresh ────────
 class _LocationTile extends StatelessWidget {
   const _LocationTile();
 
-  Future<void> _edit(BuildContext context) async {
-    final ctrl = TextEditingController(text: userLocationNotifier.value);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Ma localisation'),
-        content: TextField(
-          controller: ctrl,
-          decoration: const InputDecoration(
-            hintText: 'Ex: Lyon, FR',
-            prefixIcon: Icon(Icons.place_outlined),
-            border: OutlineInputBorder(),
-          ),
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, null),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Enregistrer'),
-          ),
-        ],
-      ),
-    );
-    ctrl.dispose();
-    if (result != null) await setUserLocation(result);
+  // Ask the service to detect location + ISP again
+  Future<void> _refresh() async {
+    final info = await InternetSpeedService.getLocationAndIsp();
+    if (info.location.isNotEmpty) await setUserLocation(info.location);
+    if (info.isp.isNotEmpty)      await setIspName(info.isp);
   }
 
   @override
@@ -122,35 +97,55 @@ class _LocationTile extends StatelessWidget {
     final t = Theme.of(context);
     return ValueListenableBuilder<String>(
       valueListenable: userLocationNotifier,
-      builder: (_, loc, __) => ListTile(
-        leading: Container(
-          width: 38, height: 38,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: t.colorScheme.primaryContainer.withOpacity(0.5),
+      builder: (_, loc, __) => ValueListenableBuilder<String>(
+        valueListenable: ispNameNotifier,
+        builder: (_, isp, __) => ListTile(
+          leading: Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: t.colorScheme.primaryContainer.withOpacity(0.5),
+            ),
+            child: Icon(Icons.place_rounded, size: 18,
+                color: t.colorScheme.primary),
           ),
-          child: Icon(Icons.place_rounded, size: 18,
-              color: t.colorScheme.primary),
-        ),
-        title: const Text('Mon lieu de test'),
-        subtitle: Text(
-          loc.isEmpty ? 'Non défini — touchez pour ajouter' : loc,
-          style: t.textTheme.bodySmall?.copyWith(
-            color: loc.isEmpty
-                ? t.colorScheme.onSurface.withOpacity(0.38)
-                : t.colorScheme.primary,
-            fontWeight: loc.isEmpty ? FontWeight.w400 : FontWeight.w600,
+          title: const Text('Localisation automatique'),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                // Show detected city or a waiting message
+                loc.isEmpty ? 'Détection en cours…' : loc,
+                style: t.textTheme.bodySmall?.copyWith(
+                  color: loc.isEmpty
+                      ? t.colorScheme.onSurface.withOpacity(0.38)
+                      : t.colorScheme.primary,
+                  fontWeight: loc.isEmpty ? FontWeight.w400 : FontWeight.w600,
+                ),
+              ),
+              if (isp.isNotEmpty)
+                Text(isp,
+                    style: t.textTheme.bodySmall?.copyWith(
+                      color:    t.colorScheme.onSurface.withOpacity(0.5),
+                      fontSize: 11,
+                    )),
+            ],
           ),
+          // Tap to re-detect — useful if the user moved or connected to a VPN
+          trailing: IconButton(
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            onPressed: _refresh,
+            tooltip: 'Rafraîchir la localisation',
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          isThreeLine: isp.isNotEmpty,
         ),
-        trailing: const Icon(Icons.chevron_right_rounded, size: 20),
-        onTap: () => _edit(context),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       ),
     );
   }
 }
 
-// ── Theme picker ──────────────────────────────────────────────────────────────
+// ── Theme picker — system / light / dark ──────────────────────────────────────
 class _ThemePicker extends StatelessWidget {
   const _ThemePicker();
   @override
@@ -166,14 +161,20 @@ class _ThemePicker extends StatelessWidget {
           valueListenable: themeModeNotifier,
           builder: (_, cur, __) => SegmentedButton<ThemeMode>(
             segments: const [
-              ButtonSegment(value: ThemeMode.system, label: Text('Système'),
-                  icon: Icon(Icons.brightness_auto, size: 15)),
-              ButtonSegment(value: ThemeMode.light,  label: Text('Clair'),
-                  icon: Icon(Icons.light_mode, size: 15)),
-              ButtonSegment(value: ThemeMode.dark,   label: Text('Sombre'),
-                  icon: Icon(Icons.dark_mode, size: 15)),
+              ButtonSegment(
+                  value: ThemeMode.system,
+                  label: Text('Système'),
+                  icon:  Icon(Icons.brightness_auto, size: 15)),
+              ButtonSegment(
+                  value: ThemeMode.light,
+                  label: Text('Clair'),
+                  icon:  Icon(Icons.light_mode, size: 15)),
+              ButtonSegment(
+                  value: ThemeMode.dark,
+                  label: Text('Sombre'),
+                  icon:  Icon(Icons.dark_mode, size: 15)),
             ],
-            selected: {cur},
+            selected:           {cur},
             onSelectionChanged: (s) => setThemeMode(s.first),
             style: const ButtonStyle(
               visualDensity: VisualDensity.compact,
@@ -193,16 +194,16 @@ class _DynamicColorTile extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: useDynamicColorNotifier,
     builder: (_, v, __) => SwitchListTile(
-      title: const Text('Couleur dynamique'),
+      title:    const Text('Couleur dynamique'),
       subtitle: const Text('Suit la couleur du fond d\'écran'),
-      value: v,
+      value:    v,
       onChanged: setDynamicColor,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     ),
   );
 }
 
-// ── Accent colour picker ──────────────────────────────────────────────────────
+// ── Accent color picker ───────────────────────────────────────────────────────
 class _ColorPickerTile extends StatelessWidget {
   const _ColorPickerTile();
   @override
@@ -211,44 +212,40 @@ class _ColorPickerTile extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: useDynamicColorNotifier,
       builder: (_, isDynamic, __) => AnimatedOpacity(
-        opacity: isDynamic ? 0.38 : 1.0,
+        opacity:  isDynamic ? 0.38 : 1.0,
         duration: const Duration(milliseconds: 200),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Couleur d\'accent', style: t.textTheme.bodyMedium
                 ?.copyWith(fontWeight: FontWeight.w500)),
-            const SizedBox(height: 2),
-            Text('Utilisée quand la couleur dynamique est désactivée',
-                style: t.textTheme.bodySmall?.copyWith(
-                    color: t.colorScheme.onSurface.withOpacity(0.5))),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             ValueListenableBuilder<Color>(
               valueListenable: seedColorNotifier,
-              builder: (_, current, __) => Wrap(
-                spacing: 10,
+              builder: (_, cur, __) => Wrap(
+                spacing: 10, runSpacing: 10,
                 children: List.generate(kPresetColors.length, (i) {
-                  final c   = kPresetColors[i];
-                  final sel = c.value == current.value;
+                  final c      = kPresetColors[i];
+                  final sel    = cur == c;
                   return GestureDetector(
                     onTap: isDynamic ? null : () => setSeedColor(i),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      width: 34, height: 34,
+                      width: 32, height: 32,
                       decoration: BoxDecoration(
-                        color: c, shape: BoxShape.circle,
+                        color:  c,
+                        shape:  BoxShape.circle,
                         border: Border.all(
                           color: sel ? Colors.white : Colors.transparent,
                           width: 2.5,
                         ),
-                        boxShadow: sel
-                            ? [BoxShadow(
-                                color: c.withOpacity(0.5),
-                                blurRadius: 8, spreadRadius: 1)]
-                            : [],
+                        boxShadow: sel ? [
+                          BoxShadow(color: c.withOpacity(0.5), blurRadius: 6)
+                        ] : null,
                       ),
                       child: sel
-                          ? const Icon(Icons.check, color: Colors.white, size: 16)
+                          ? const Icon(Icons.check_rounded, size: 14,
+                              color: Colors.white)
                           : null,
                     ),
                   );
@@ -268,7 +265,7 @@ class _ServerList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t       = Theme.of(context);
-    const servers = InternetSpeedService.servers;
+    final servers = InternetSpeedService.availableServers;
     return ValueListenableBuilder<int>(
       valueListenable: selectedServerNotifier,
       builder: (_, selected, __) => Column(
@@ -276,20 +273,20 @@ class _ServerList extends StatelessWidget {
           final s = servers[i];
           return Column(children: [
             RadioListTile<int>(
-              value: i, groupValue: selected,
-              onChanged: (v) => setServer(v!),
+              value:       i,
+              groupValue:  selected,
+              onChanged:   (v) => setServer(v!),
               title: Text('${s.flag}  ${s.name}',
                   style: t.textTheme.bodyMedium
                       ?.copyWith(fontWeight: FontWeight.w500)),
               subtitle: Text('${s.location} — ${s.provider}',
                   style: t.textTheme.bodySmall?.copyWith(
                       color: t.colorScheme.onSurface.withOpacity(0.5))),
-              dense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+              dense:          true,
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 2),
             ),
-            if (i < servers.length - 1)
-              const Divider(height: 1, indent: 16),
+            if (i < servers.length - 1) const Divider(height: 1, indent: 16),
           ]);
         }),
       ),
@@ -297,59 +294,70 @@ class _ServerList extends StatelessWidget {
   }
 }
 
-// ── Duration slider ───────────────────────────────────────────────────────────
+// ── Duration slider — picks test duration in seconds ──────────────────────────
 class _DurationSlider extends StatelessWidget {
   const _DurationSlider();
 
-  static const _steps = [10, 25, 50, 100, 200, 500];
+  // Available steps in seconds
+  static const _steps = [5, 10, 15, 20, 30, 60];
 
-  static int _mbToStep(int mb) {
+  // Find the closest step index for the current saved value
+  static int _secsToStep(int secs) {
     int closest = 0;
     for (int i = 0; i < _steps.length; i++) {
-      if ((_steps[i] - mb).abs() < (_steps[closest] - mb).abs()) closest = i;
+      if ((_steps[i] - secs).abs() < (_steps[closest] - secs).abs()) {
+        closest = i;
+      }
     }
     return closest;
   }
 
-  static String _estDuration(int mb) {
-    final secs = (mb * 8) / 100;
-    if (secs < 60) return '~${secs.round()}s';
-    return '~${(secs / 60).toStringAsFixed(1)} min';
+  // Human-readable label: 60 → "1 min", 15 → "15 s"
+  static String _secsLabel(int secs) =>
+      secs == 60 ? '1 min' : '$secs s';
+
+  // Rough accuracy hint shown below the slider
+  static String _accuracyHint(int secs) {
+    if (secs <= 5)  return 'Rapide — moins précis';
+    if (secs <= 15) return 'Bon équilibre vitesse / précision';
+    if (secs <= 30) return 'Précis — recommandé';
+    return 'Très précis — comme nPerf';
   }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     return ValueListenableBuilder<int>(
-      valueListenable: downloadSizeMBNotifier,
+      valueListenable: testDurationSecsNotifier,
       builder: (_, cur, __) {
-        final stepIdx = _mbToStep(cur);
-        final mb      = _steps[stepIdx];
+        final stepIdx = _secsToStep(cur);
+        final secs    = _steps[stepIdx];
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('Volume de téléchargement',
+              Text('Durée du téléchargement',
                   style: t.textTheme.bodyMedium
                       ?.copyWith(fontWeight: FontWeight.w500)),
+              // Current value badge
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: t.colorScheme.primaryContainer.withOpacity(0.5),
+                  color:        t.colorScheme.primaryContainer.withOpacity(0.5),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text('$mb MB',
+                child: Text(_secsLabel(secs),
                     style: t.textTheme.labelMedium?.copyWith(
-                        color: t.colorScheme.primary,
+                        color:      t.colorScheme.primary,
                         fontWeight: FontWeight.bold)),
               ),
             ]),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
 
+            // Accuracy hint
             Text(
-              'Durée estimée : ${_estDuration(mb)} à 100 Mb/s'
-              '  ·  Plus grand = plus précis',
+              _accuracyHint(secs),
               style: t.textTheme.bodySmall?.copyWith(
                   color: t.colorScheme.onSurface.withOpacity(0.5)),
             ),
@@ -357,28 +365,28 @@ class _DurationSlider extends StatelessWidget {
 
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
-                trackHeight: 3,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                overlayShape:
-                    const RoundSliderOverlayShape(overlayRadius: 18),
+                trackHeight:  3,
+                thumbShape:   const RoundSliderThumbShape(enabledThumbRadius: 8),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
               ),
               child: Slider(
-                min: 0,
-                max: (_steps.length - 1).toDouble(),
+                min:       0,
+                max:       (_steps.length - 1).toDouble(),
                 divisions: _steps.length - 1,
-                value: stepIdx.toDouble(),
-                onChanged: (v) => setDownloadSize(_steps[v.round()]),
+                value:     stepIdx.toDouble(),
+                onChanged: (v) => setTestDuration(_steps[v.round()]),
               ),
             ),
 
+            // Labels under the slider
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: _steps.map((s) {
-                  final selected = s == mb;
+                  final selected = s == secs;
                   return Text(
-                    s >= 1000 ? '${s ~/ 1000}G' : '${s}M',
+                    s == 60 ? '1m' : '${s}s',
                     style: t.textTheme.labelSmall?.copyWith(
                       color: selected
                           ? t.colorScheme.primary
@@ -396,7 +404,7 @@ class _DurationSlider extends StatelessWidget {
   }
 }
 
-// ── Unit picker ───────────────────────────────────────────────────────────────
+// ── Unit picker — Mbps vs MB/s ────────────────────────────────────────────────
 class _UnitPicker extends StatelessWidget {
   const _UnitPicker();
   @override
@@ -419,7 +427,7 @@ class _UnitPicker extends StatelessWidget {
               ButtonSegment(value: true,  label: Text('Mbps')),
               ButtonSegment(value: false, label: Text('MB/s')),
             ],
-            selected: {isMbps},
+            selected:           {isMbps},
             onSelectionChanged: (s) => setSpeedUnit(s.first),
             style: const ButtonStyle(
               visualDensity: VisualDensity.compact,
@@ -439,9 +447,9 @@ class _AutoSaveTile extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: autoSaveHistoryNotifier,
     builder: (_, v, __) => SwitchListTile(
-      title: const Text('Sauvegarde auto'),
+      title:    const Text('Sauvegarde auto'),
       subtitle: const Text('Enregistrer chaque test dans les logs'),
-      value: v,
+      value:    v,
       onChanged: setAutoSave,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     ),
@@ -456,21 +464,24 @@ class _ClearHistoryTile extends StatelessWidget {
     final t = Theme.of(context);
     return ListTile(
       leading: Icon(Icons.delete_sweep_outlined, color: t.colorScheme.error),
-      title: Text('Effacer tous les logs',
+      title:   Text('Effacer tous les logs',
           style: TextStyle(color: t.colorScheme.error)),
-      subtitle: Text('Supprimer définitivement tous les résultats enregistrés',
+      subtitle: Text(
+          'Supprimer définitivement tous les résultats enregistrés',
           style: t.textTheme.bodySmall?.copyWith(
               color: t.colorScheme.onSurface.withOpacity(0.5))),
       onTap: () async {
         final ok = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Effacer les logs'),
+            title:   const Text('Effacer les logs'),
             content: const Text(
                 'Supprimer tous les résultats ? Action irréversible.'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Annuler')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Annuler'),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 child: Text('Supprimer',

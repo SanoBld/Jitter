@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
@@ -8,7 +10,7 @@ class SpeedServer {
   final String provider;
   final String flag;
   final String downloadUrl;
-  /// true = fonctionne sur Flutter Web (header CORS présent)
+  // true = works on Flutter Web (server has CORS headers)
   final bool corsCompatible;
 
   const SpeedServer({
@@ -20,15 +22,14 @@ class SpeedServer {
     this.corsCompatible = false,
   });
 
-  String get pingUrl => downloadUrl;
-  String get displayLine => '$flag  $name — $provider';
-  String get subtitle => location;
+  String get pingUrl      => downloadUrl;
+  String get displayLine  => '$flag  $name — $provider';
+  String get subtitle     => location;
 }
 
 class InternetSpeedService {
   static const List<SpeedServer> servers = [
-    // ── Serveurs CORS-compatibles (web + natif) ────────────────────────────
-    // Cloudflare speed.cloudflare.com envoie Access-Control-Allow-Origin: *
+    // ── CORS-compatible servers (web + native) ─────────────────────────────
     SpeedServer(
       name: 'Cloudflare Global',
       location: 'Anycast, Global',
@@ -46,7 +47,7 @@ class InternetSpeedService {
       corsCompatible: true,
     ),
 
-    // ── Serveurs natifs uniquement (pas de CORS) ──────────────────────────
+    // ── Native-only servers (no CORS) ──────────────────────────────────────
     SpeedServer(
       name: 'Paris',
       location: 'Paris, FR',
@@ -105,34 +106,53 @@ class InternetSpeedService {
     ),
   ];
 
-  /// Retourne uniquement les serveurs disponibles sur la plateforme courante.
+  // Only show CORS-compatible servers when running in a browser
   static List<SpeedServer> get availableServers =>
       kIsWeb ? servers.where((s) => s.corsCompatible).toList() : servers;
 
-  /// Vérifie si le serveur sélectionné est compatible avec la plateforme.
-  /// Retourne l'index corrigé si nécessaire.
+  // If on web, fall back to the first CORS-compatible server
   static int resolveServerIndex(int index) {
     if (!kIsWeb) return index.clamp(0, servers.length - 1);
     final available = availableServers;
     if (available.isEmpty) return 0;
-    // Sur web, on ne peut utiliser que les serveurs CORS-compatibles
     final server = servers[index.clamp(0, servers.length - 1)];
     if (server.corsCompatible) return index;
-    // Fallback vers le premier serveur CORS-compatible
     return servers.indexOf(available.first);
   }
 
   static const List<String> _uploadUrls = [
-    // Cloudflare upload endpoint — CORS-compatible
     'https://speed.cloudflare.com/__up',
     'https://httpbin.org/post',
     'https://postman-echo.com/post',
   ];
 
   static const Duration _connectTimeout = Duration(seconds: 10);
-  static const Duration _streamTimeout  = Duration(seconds: 45);
+  static const Duration _streamTimeout  = Duration(seconds: 90);
 
-  // ── Ping ──────────────────────────────────────────────────────────────────
+  // ── Auto-detect location and ISP from the device's public IP ─────────────
+  // Uses ipapi.co — free, HTTPS, no key needed, 1000 req/day limit
+  static Future<({String location, String isp})> getLocationAndIsp() async {
+    try {
+      final resp = await http
+          .get(Uri.parse('https://ipapi.co/json/'))
+          .timeout(const Duration(seconds: 8));
+      if (resp.statusCode == 200) {
+        final data     = json.decode(resp.body) as Map<String, dynamic>;
+        final city     = data['city']         as String? ?? '';
+        final country  = data['country_code'] as String? ?? '';
+        final org      = data['org']          as String? ?? '';
+        // "org" comes as "AS12345 Free SAS" — strip the AS number
+        final isp      = org.replaceAll(RegExp(r'^AS\d+\s*'), '');
+        final location = [city, country].where((s) => s.isNotEmpty).join(', ');
+        return (location: location, isp: isp);
+      }
+    } catch (_) {
+      // If request fails, just return empty strings — caller handles it
+    }
+    return (location: '', isp: '');
+  }
+
+  // ── Single ping — returns ms, or 999 if it fails ─────────────────────────
   Future<int> testPing(int serverIndex) async {
     final resolvedIndex = resolveServerIndex(serverIndex);
     final server = servers[resolvedIndex];
@@ -140,10 +160,9 @@ class InternetSpeedService {
     final sw = Stopwatch()..start();
     try {
       final request = http.Request('GET', Uri.parse(server.pingUrl));
-      // Sur web : pas de Range header (peut causer des CORS preflight)
+      // On web we skip Range header to avoid CORS preflight issues
       if (!kIsWeb) request.headers['Range'] = 'bytes=0-0';
-      final response =
-          await client.send(request).timeout(_connectTimeout);
+      final response = await client.send(request).timeout(_connectTimeout);
       sw.stop();
       await response.stream.drain<void>();
       if (response.statusCode == 200 || response.statusCode == 206) {
@@ -161,38 +180,70 @@ class InternetSpeedService {
     }
   }
 
-  // ── Download ──────────────────────────────────────────────────────────────
+  // ── Ping 5 times and compute average + jitter ─────────────────────────────
+  // Jitter = standard deviation of the ping samples (how much ping varies)
+  // This is what gives the app its name!
+  Future<({int ping, int jitter})> testPingWithJitter(int serverIndex) async {
+    const count  = 5;
+    final pings  = <int>[];
+
+    for (int i = 0; i < count; i++) {
+      pings.add(await testPing(serverIndex));
+      // Small gap between pings
+      if (i < count - 1) {
+        await Future.delayed(const Duration(milliseconds: 250));
+      }
+    }
+
+    // Remove failed pings before calculating
+    final valid = pings.where((p) => p < 999).toList();
+    if (valid.isEmpty) return (ping: 999, jitter: 0);
+
+    final avg      = valid.reduce((a, b) => a + b) / valid.length;
+    final variance = valid
+        .map((p) => (p - avg) * (p - avg))
+        .reduce((a, b) => a + b) / valid.length;
+
+    return (
+      ping:   avg.round(),
+      jitter: sqrt(variance).round(),
+    );
+  }
+
+  // ── Download — runs for durationSecs seconds then stops ───────────────────
   Stream<double> testDownloadSpeed({
     required int serverIndex,
-    required int maxMB,
+    required int durationSecs,
   }) {
     final resolvedIndex = resolveServerIndex(serverIndex);
-    final controller = StreamController<double>();
+    final controller    = StreamController<double>();
     _downloadInternal(
-      serverIndex: resolvedIndex,
-      maxMB: maxMB,
-      controller: controller,
+      serverIndex:  resolvedIndex,
+      durationSecs: durationSecs,
+      controller:   controller,
     );
     return controller.stream;
   }
 
   Future<void> _downloadInternal({
     required int serverIndex,
-    required int maxMB,
+    required int durationSecs,
     required StreamController<double> controller,
   }) async {
-    final server = servers[serverIndex];
-    final client = http.Client();
-    final sw = Stopwatch()..start();
+    final server   = servers[serverIndex];
+    final client   = http.Client();
+    final sw       = Stopwatch()..start();
     Timer? watchdog;
+    final maxMs    = durationSecs * 1000;   // stop after this many ms
+    const maxBytes = 2 * 1024 * 1024 * 1024; // 2 GB safety cap
 
+    // Watchdog resets each time we receive data; fires if network goes silent
     void resetWatchdog() {
       watchdog?.cancel();
       watchdog = Timer(const Duration(seconds: 10), () {
         if (!controller.isClosed) {
           controller.addError(
-            TimeoutException(
-                'Aucune donnée reçue depuis 10 s — vérifiez le réseau'),
+            TimeoutException('No data received for 10s — check network'),
           );
           controller.close();
           client.close();
@@ -201,17 +252,14 @@ class InternetSpeedService {
     }
 
     try {
-      final request = http.Request('GET', Uri.parse(server.downloadUrl));
-      final response =
-          await client.send(request).timeout(_connectTimeout);
+      final request  = http.Request('GET', Uri.parse(server.downloadUrl));
+      final response = await client.send(request).timeout(_connectTimeout);
 
       if (response.statusCode >= 400) {
-        throw Exception(
-            'Serveur ${server.name} : HTTP ${response.statusCode}');
+        throw Exception('Server ${server.name}: HTTP ${response.statusCode}');
       }
 
       int received = 0;
-      final maxBytes = maxMB * 1024 * 1024;
       resetWatchdog();
 
       await for (final chunk in response.stream.timeout(
@@ -223,11 +271,15 @@ class InternetSpeedService {
       )) {
         resetWatchdog();
         received += chunk.length;
+
+        // Emit speed reading after 0.5s warmup
         final secs = sw.elapsedMilliseconds / 1000.0;
         if (secs > 0.5) {
           controller.add((received * 8) / secs / (1024 * 1024));
         }
-        if (received >= maxBytes) break;
+
+        // Stop when the configured time is up or safety cap reached
+        if (sw.elapsedMilliseconds >= maxMs || received >= maxBytes) break;
       }
 
       watchdog?.cancel();
@@ -249,10 +301,9 @@ class InternetSpeedService {
     }
   }
 
-  // ── Upload ────────────────────────────────────────────────────────────────
+  // ── Upload — tries each URL until one works ────────────────────────────────
   Future<double> testUploadSpeed({int sizeMB = 2}) async {
-    final payload =
-        List<int>.generate(sizeMB * 1024 * 1024, (i) => i & 0xFF);
+    final payload = List<int>.generate(sizeMB * 1024 * 1024, (i) => i & 0xFF);
     for (final url in _uploadUrls) {
       final result = await _tryUpload(url: url, payload: payload);
       if (result > 0) return result;
@@ -266,14 +317,13 @@ class InternetSpeedService {
   }) async {
     final client = http.Client();
     try {
-      final sw = Stopwatch()..start();
+      final sw      = Stopwatch()..start();
       final request = http.MultipartRequest('POST', Uri.parse(url))
         ..files.add(http.MultipartFile.fromBytes(
           'file', payload,
           filename: 'upload.bin',
         ));
-      final response =
-          await client.send(request).timeout(_streamTimeout);
+      final response = await client.send(request).timeout(_streamTimeout);
       sw.stop();
       await response.stream.drain<void>();
       if (response.statusCode == 200 || response.statusCode == 204) {
