@@ -7,7 +7,7 @@ import 'screens/home_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock the app to portrait mode
+  // Lock to portrait — speed test gauges only make sense in portrait
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -22,7 +22,6 @@ class JitterApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild whenever theme mode, dynamic color, or seed color changes
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: themeModeNotifier,
       builder: (_, mode, __) => ValueListenableBuilder<bool>(
@@ -31,7 +30,6 @@ class JitterApp extends StatelessWidget {
           valueListenable: seedColorNotifier,
           builder: (_, seedColor, __) => DynamicColorBuilder(
             builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-              // Use dynamic wallpaper colors if available and enabled
               final light = (useDynamic && lightDynamic != null)
                   ? lightDynamic
                   : ColorScheme.fromSeed(seedColor: seedColor);
@@ -42,7 +40,7 @@ class JitterApp extends StatelessWidget {
                       brightness: Brightness.dark,
                     );
               return MaterialApp(
-                title:                    'Jitter',
+                title:                     'Jitter',
                 debugShowCheckedModeBanner: false,
                 theme:     ThemeData(colorScheme: light, useMaterial3: true),
                 darkTheme: ThemeData(colorScheme: dark,  useMaterial3: true),

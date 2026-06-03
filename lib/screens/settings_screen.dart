@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../app_state.dart';
 import '../services/internet_speed_service.dart';
+import '../services/location_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -10,14 +11,19 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
       children: [
-        Text('SETTINGS', style: t.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-        const SizedBox(height: 24),
+        Text('SETTINGS',
+            style: t.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+        const SizedBox(height: 22),
 
-        _section('LOCATION', [const _LocationTile()], t),
-        const SizedBox(height: 16),
+        _section('LOCATION', [
+          const _GpsTile(),
+          const Divider(height: 1),
+          const _IpLocationTile(),
+        ], t),
+        const SizedBox(height: 14),
 
         _section('APPEARANCE', [
           const _ThemePicker(),
@@ -26,44 +32,47 @@ class SettingsScreen extends StatelessWidget {
           const Divider(height: 1),
           const _ColorPickerTile(),
         ], t),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
 
-        // Server section includes the auto-fallback toggle
         _section('TEST SERVER', [
           const _ServerList(),
           const Divider(height: 1),
           const _AutoFallbackTile(),
         ], t),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
 
         _section('TEST DURATION', [const _DurationSlider()], t),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
 
         _section('UNIT', [const _UnitPicker()], t),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
 
         _section('HISTORY', [
           const _AutoSaveTile(),
           const Divider(height: 1),
           const _ClearHistoryTile(),
         ], t),
-        const SizedBox(height: 40),
+        const SizedBox(height: 36),
 
-        Center(child: Text('Jitter v1.0.0  ·  Made with Flutter',
-            style: t.textTheme.bodySmall?.copyWith(
-                color: t.colorScheme.onSurface.withOpacity(0.28)))),
+        Center(
+          child: Text('Jitter v1.0.0  ·  Made with Flutter',
+              style: t.textTheme.bodySmall?.copyWith(
+                  color: t.colorScheme.onSurface.withOpacity(0.26))),
+        ),
       ],
     );
   }
 
-  Widget _section(String title, List<Widget> children, ThemeData t) =>
+  static Widget _section(String title, List<Widget> children, ThemeData t) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 8),
-          child: Text(title, style: t.textTheme.labelSmall?.copyWith(
-              color:         t.colorScheme.primary,
-              fontWeight:    FontWeight.bold,
-              letterSpacing: 1.5)),
+          child: Text(title,
+              style: t.textTheme.labelSmall?.copyWith(
+                color:         t.colorScheme.primary,
+                fontWeight:    FontWeight.bold,
+                letterSpacing: 1.5,
+              )),
         ),
         Container(
           decoration: BoxDecoration(
@@ -80,15 +89,126 @@ class SettingsScreen extends StatelessWidget {
       ]);
 }
 
-// ── Location tile ──────────────────────────────────────────────────────────
-class _LocationTile extends StatelessWidget {
-  const _LocationTile();
+// ── GPS location tile ──────────────────────────────────────────────────────
+class _GpsTile extends StatelessWidget {
+  const _GpsTile();
+
+  Future<void> _requestGps(BuildContext context) async {
+    gpsFetchingNotifier.value = true;
+    try {
+      final result = await LocationService.getGpsLocation();
+      if (result.city.isNotEmpty) {
+        await setGpsLocation(result.city, result.lat, result.lng);
+      } else if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('GPS unavailable — check location permissions.'),
+          ),
+        );
+      }
+    } finally {
+      gpsFetchingNotifier.value = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return ValueListenableBuilder<bool>(
+      valueListenable: useGpsLocationNotifier,
+      builder: (_, useGps, __) => ValueListenableBuilder<bool>(
+        valueListenable: gpsFetchingNotifier,
+        builder: (_, fetching, __) => ValueListenableBuilder<String>(
+          valueListenable: gpsLocationNotifier,
+          builder: (_, city, __) => ValueListenableBuilder<double?>(
+            valueListenable: gpsLatNotifier,
+            builder: (_, lat, __) => ValueListenableBuilder<double?>(
+              valueListenable: gpsLngNotifier,
+              builder: (_, lng, __) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    title: const Text('GPS location'),
+                    subtitle: const Text(
+                        'Use device sensor for your real city name'),
+                    value:     useGps,
+                    onChanged: setUseGps,
+                    secondary: Container(
+                      width: 36, height: 36,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: t.colorScheme.tertiaryContainer.withOpacity(0.5),
+                      ),
+                      child: Icon(Icons.gps_fixed_rounded,
+                          size: 16, color: t.colorScheme.tertiary),
+                    ),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  ),
+                  // Show GPS result when enabled
+                  if (useGps)
+                    Padding(
+                      padding:
+                          const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: Row(children: [
+                        const SizedBox(width: 46),
+                        Expanded(
+                          child: Text(
+                            fetching
+                                ? 'Detecting GPS location…'
+                                : city.isEmpty
+                                    ? 'Not detected — tap to try'
+                                    : '📍  $city${lat != null ? '  (${lat.toStringAsFixed(2)}, ${lng?.toStringAsFixed(2)})' : ''}',
+                            style: t.textTheme.bodySmall?.copyWith(
+                              color: city.isNotEmpty && !fetching
+                                  ? t.colorScheme.tertiary
+                                  : t.colorScheme.onSurface.withOpacity(0.4),
+                              fontWeight: city.isNotEmpty && !fetching
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        if (!fetching)
+                          IconButton(
+                            icon: const Icon(Icons.refresh_rounded, size: 16),
+                            onPressed: () => _requestGps(context),
+                            tooltip: 'Refresh GPS location',
+                            color: t.colorScheme.tertiary,
+                            visualDensity: VisualDensity.compact,
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: SizedBox(
+                              width: 14, height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: t.colorScheme.tertiary,
+                              ),
+                            ),
+                          ),
+                      ]),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── IP location tile ───────────────────────────────────────────────────────
+class _IpLocationTile extends StatelessWidget {
+  const _IpLocationTile();
 
   Future<void> _refresh() async {
     locationFetchingNotifier.value = true;
     try {
       final info = await InternetSpeedService.getLocationAndIsp();
-      if (info.location.isNotEmpty) await setUserLocation(info.location);
+      if (info.location.isNotEmpty) await setIpLocation(info.location);
       if (info.isp.isNotEmpty)      await setIspName(info.isp);
     } finally {
       locationFetchingNotifier.value = false;
@@ -101,28 +221,25 @@ class _LocationTile extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: locationFetchingNotifier,
       builder: (_, fetching, __) => ValueListenableBuilder<String>(
-        valueListenable: userLocationNotifier,
+        valueListenable: ipLocationNotifier,
         builder: (_, loc, __) => ValueListenableBuilder<String>(
           valueListenable: ispNameNotifier,
           builder: (_, isp, __) => ListTile(
             leading: Container(
-              width: 38, height: 38,
+              width: 36, height: 36,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: t.colorScheme.primaryContainer.withOpacity(0.5),
+                color: t.colorScheme.secondaryContainer.withOpacity(0.5),
               ),
               child: fetching
                   ? Padding(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(9),
                       child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: t.colorScheme.primary,
-                      ),
-                    )
-                  : Icon(Icons.place_rounded, size: 18,
-                      color: t.colorScheme.primary),
+                          strokeWidth: 2, color: t.colorScheme.secondary))
+                  : Icon(Icons.language_rounded,
+                      size: 16, color: t.colorScheme.secondary),
             ),
-            title: const Text('Auto-detected location'),
+            title: const Text('IP-based location'),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -130,36 +247,28 @@ class _LocationTile extends StatelessWidget {
                   fetching
                       ? 'Detecting…'
                       : loc.isEmpty
-                          ? 'Not detected yet'
+                          ? 'Not detected'
                           : loc,
                   style: t.textTheme.bodySmall?.copyWith(
-                    color: (fetching || loc.isEmpty)
-                        ? t.colorScheme.onSurface.withOpacity(0.38)
-                        : t.colorScheme.primary,
-                    fontWeight:
-                        (fetching || loc.isEmpty) ? FontWeight.w400 : FontWeight.w600,
+                    color: loc.isNotEmpty && !fetching
+                        ? t.colorScheme.secondary
+                        : t.colorScheme.onSurface.withOpacity(0.38),
+                    fontWeight: loc.isNotEmpty && !fetching
+                        ? FontWeight.w600
+                        : FontWeight.normal,
                   ),
                 ),
                 if (isp.isNotEmpty && !fetching)
                   Text(isp,
                       style: t.textTheme.bodySmall?.copyWith(
-                        color:    t.colorScheme.onSurface.withOpacity(0.5),
-                        fontSize: 11,
-                      )),
+                          fontSize: 11,
+                          color: t.colorScheme.onSurface.withOpacity(0.45))),
               ],
             ),
             trailing: IconButton(
-              icon: fetching
-                  ? SizedBox(
-                      width: 18, height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: t.colorScheme.primary.withOpacity(0.5),
-                      ),
-                    )
-                  : const Icon(Icons.refresh_rounded, size: 18),
+              icon: const Icon(Icons.refresh_rounded, size: 17),
               onPressed: fetching ? null : _refresh,
-              tooltip: 'Refresh location',
+              tooltip: 'Refresh IP location',
             ),
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -180,8 +289,9 @@ class _ThemePicker extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Theme', style: t.textTheme.bodyMedium
-            ?.copyWith(fontWeight: FontWeight.w500)),
+        Text('Theme',
+            style:
+                t.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
         const SizedBox(height: 12),
         ValueListenableBuilder<ThemeMode>(
           valueListenable: themeModeNotifier,
@@ -190,15 +300,15 @@ class _ThemePicker extends StatelessWidget {
               ButtonSegment(
                   value: ThemeMode.system,
                   label: Text('System'),
-                  icon:  Icon(Icons.brightness_auto, size: 15)),
+                  icon:  Icon(Icons.brightness_auto, size: 14)),
               ButtonSegment(
                   value: ThemeMode.light,
                   label: Text('Light'),
-                  icon:  Icon(Icons.light_mode, size: 15)),
+                  icon:  Icon(Icons.light_mode, size: 14)),
               ButtonSegment(
                   value: ThemeMode.dark,
                   label: Text('Dark'),
-                  icon:  Icon(Icons.dark_mode, size: 15)),
+                  icon:  Icon(Icons.dark_mode, size: 14)),
             ],
             selected:           {cur},
             onSelectionChanged: (s) => setThemeMode(s.first),
@@ -221,10 +331,11 @@ class _DynamicColorTile extends StatelessWidget {
     valueListenable: useDynamicColorNotifier,
     builder: (_, v, __) => SwitchListTile(
       title:    const Text('Dynamic color'),
-      subtitle: const Text('Follows your wallpaper colors'),
+      subtitle: const Text('Follows your wallpaper colors (Android 12+)'),
       value:    v,
       onChanged: setDynamicColor,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     ),
   );
 }
@@ -238,13 +349,14 @@ class _ColorPickerTile extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: useDynamicColorNotifier,
       builder: (_, isDynamic, __) => AnimatedOpacity(
-        opacity:  isDynamic ? 0.38 : 1.0,
+        opacity:  isDynamic ? 0.35 : 1.0,
         duration: const Duration(milliseconds: 200),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Accent color', style: t.textTheme.bodyMedium
-                ?.copyWith(fontWeight: FontWeight.w500)),
+            Text('Accent color',
+                style: t.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w500)),
             const SizedBox(height: 12),
             ValueListenableBuilder<Color>(
               valueListenable: seedColorNotifier,
@@ -265,13 +377,13 @@ class _ColorPickerTile extends StatelessWidget {
                           color: sel ? Colors.white : Colors.transparent,
                           width: 2.5,
                         ),
-                        boxShadow: sel ? [
-                          BoxShadow(color: c.withOpacity(0.5), blurRadius: 6)
-                        ] : null,
+                        boxShadow: sel
+                            ? [BoxShadow(color: c.withOpacity(0.5), blurRadius: 6)]
+                            : null,
                       ),
                       child: sel
-                          ? const Icon(Icons.check_rounded, size: 14,
-                              color: Colors.white)
+                          ? const Icon(Icons.check_rounded,
+                              size: 14, color: Colors.white)
                           : null,
                     ),
                   );
@@ -307,12 +419,14 @@ class _ServerList extends StatelessWidget {
                       ?.copyWith(fontWeight: FontWeight.w500)),
               subtitle: Text('${s.location} — ${s.provider}',
                   style: t.textTheme.bodySmall?.copyWith(
-                      color: t.colorScheme.onSurface.withOpacity(0.5))),
+                      color: t.colorScheme.onSurface.withOpacity(0.45))),
               dense:          true,
               contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 2),
             ),
-            if (i < servers.length - 1) const Divider(height: 1, indent: 16),
+            if (i < servers.length - 1)
+              Divider(height: 1, indent: 16,
+                  color: t.colorScheme.onSurface.withOpacity(0.06)),
           ]);
         }),
       ),
@@ -321,7 +435,6 @@ class _ServerList extends StatelessWidget {
 }
 
 // ── Auto-fallback toggle ───────────────────────────────────────────────────
-// When enabled, the app tries the next server if the current one fails
 class _AutoFallbackTile extends StatelessWidget {
   const _AutoFallbackTile();
   @override
@@ -329,10 +442,12 @@ class _AutoFallbackTile extends StatelessWidget {
     valueListenable: autoFallbackNotifier,
     builder: (_, v, __) => SwitchListTile(
       title:    const Text('Auto-fallback'),
-      subtitle: const Text('Switch to next server if current one fails'),
-      value:    v,
+      subtitle: const Text(
+          'Automatically try the next server if the current one fails'),
+      value:     v,
       onChanged: setAutoFallback,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     ),
   );
 }
@@ -341,33 +456,28 @@ class _AutoFallbackTile extends StatelessWidget {
 class _DurationSlider extends StatelessWidget {
   const _DurationSlider();
 
-  // 0 = infinite (runs until user stops, max 10 min)
-  static const _steps = [5, 10, 15, 20, 30, 60, 0];
+  // 0 = infinite (runs until STOP)
+  static const _steps = [5, 10, 15, 30, 60, 0];
 
-  static int _secsToStep(int secs) {
-    int closest = 0;
-    for (int i = 0; i < _steps.length; i++) {
-      if (secs == 0 && _steps[i] == 0) return i;
-      if (secs != 0 && (_steps[i] - secs).abs() < (_steps[closest] - secs).abs()
-          && _steps[i] != 0) {
-        closest = i;
-      }
+  static int _idx(int secs) {
+    if (secs == 0) return _steps.length - 1;
+    int best = 0;
+    for (int i = 0; i < _steps.length - 1; i++) {
+      if ((_steps[i] - secs).abs() < (_steps[best] - secs).abs()) best = i;
     }
-    return secs == 0 ? _steps.length - 1 : closest;
+    return best;
   }
 
-  static String _secsLabel(int secs) {
-    if (secs == 0)  return '∞';
-    if (secs == 60) return '1 min';
-    return '$secs s';
+  static String _label(int s) {
+    if (s == 0)  return '∞';
+    if (s == 60) return '1 min';
+    return '$s s';
   }
 
-  static String _accuracyHint(int secs) {
-    if (secs == 0)  return 'Runs until you press Stop (max 10 min)';
-    if (secs <= 5)  return 'Fast — less accurate';
-    if (secs <= 15) return 'Good speed / accuracy balance';
-    if (secs <= 30) return 'Accurate — recommended';
-    return 'Very accurate — like nPerf';
+  static String _hint(int s) {
+    if (s == 0)    return 'Runs until you press STOP  (max 10 min)';
+    final pd = (s == 0 ? 0 : s ~/ 2).clamp(3, 60);
+    return '${pd}s ↓ download  +  ${pd}s ↑ upload';
   }
 
   @override
@@ -376,67 +486,66 @@ class _DurationSlider extends StatelessWidget {
     return ValueListenableBuilder<int>(
       valueListenable: testDurationSecsNotifier,
       builder: (_, cur, __) {
-        final stepIdx = _secsToStep(cur);
-        final secs    = _steps[stepIdx];
+        final idx  = _idx(cur);
+        final secs = _steps[idx];
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('Duration per phase',
+            Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+              Text('Duration per test',
                   style: t.textTheme.bodyMedium
                       ?.copyWith(fontWeight: FontWeight.w500)),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color:        t.colorScheme.primaryContainer.withOpacity(0.5),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(_secsLabel(secs),
+                child: Text(_label(secs),
                     style: t.textTheme.labelMedium?.copyWith(
                         color:      t.colorScheme.primary,
                         fontWeight: FontWeight.bold)),
               ),
             ]),
             const SizedBox(height: 4),
-
-            Text(
-              _accuracyHint(secs),
-              style: t.textTheme.bodySmall?.copyWith(
-                  color: t.colorScheme.onSurface.withOpacity(0.5)),
-            ),
-            const SizedBox(height: 12),
-
+            Text(_hint(secs),
+                style: t.textTheme.bodySmall?.copyWith(
+                    color: t.colorScheme.onSurface.withOpacity(0.45))),
+            const SizedBox(height: 10),
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight:  3,
-                thumbShape:   const RoundSliderThumbShape(enabledThumbRadius: 8),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
+                thumbShape:
+                    const RoundSliderThumbShape(enabledThumbRadius: 8),
+                overlayShape:
+                    const RoundSliderOverlayShape(overlayRadius: 18),
               ),
               child: Slider(
                 min:       0,
                 max:       (_steps.length - 1).toDouble(),
                 divisions: _steps.length - 1,
-                value:     stepIdx.toDouble(),
+                value:     idx.toDouble(),
                 onChanged: (v) => setTestDuration(_steps[v.round()]),
               ),
             ),
-
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: _steps.map((s) {
-                  final selected = s == secs;
-                  return Text(
-                    s == 0 ? '∞' : s == 60 ? '1m' : '${s}s',
-                    style: t.textTheme.labelSmall?.copyWith(
-                      color: selected
-                          ? t.colorScheme.primary
-                          : t.colorScheme.onSurface.withOpacity(0.35),
-                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  );
+                  final sel = s == secs;
+                  return Text(_label(s),
+                      style: t.textTheme.labelSmall?.copyWith(
+                        fontSize:   10,
+                        color: sel
+                            ? t.colorScheme.primary
+                            : t.colorScheme.onSurface.withOpacity(0.3),
+                        fontWeight:
+                            sel ? FontWeight.bold : FontWeight.normal,
+                      ));
                 }).toList(),
               ),
             ),
@@ -456,19 +565,20 @@ class _UnitPicker extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Speed unit', style: t.textTheme.bodyMedium
-            ?.copyWith(fontWeight: FontWeight.w500)),
+        Text('Speed unit',
+            style: t.textTheme.bodyMedium
+                ?.copyWith(fontWeight: FontWeight.w500)),
         const SizedBox(height: 2),
-        Text('Mbps = megabits/s  ·  MB/s = megabytes/s  (÷ 8)',
+        Text('Mb/s = megabits/s  ·  MB/s = megabytes/s  (= Mb/s ÷ 8)',
             style: t.textTheme.bodySmall?.copyWith(
-                color: t.colorScheme.onSurface.withOpacity(0.5))),
+                color: t.colorScheme.onSurface.withOpacity(0.45))),
         const SizedBox(height: 12),
         ValueListenableBuilder<bool>(
           valueListenable: speedUnitMbpsNotifier,
           builder: (_, isMbps, __) => SegmentedButton<bool>(
             segments: const [
-              ButtonSegment(value: true,  label: Text('Mbps')),
-              ButtonSegment(value: false, label: Text('MB/s')),
+              ButtonSegment(value: true,  label: Text('Mb/s  (bits)')),
+              ButtonSegment(value: false, label: Text('MB/s  (bytes)')),
             ],
             selected:           {isMbps},
             onSelectionChanged: (s) => setSpeedUnit(s.first),
@@ -490,11 +600,12 @@ class _AutoSaveTile extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: autoSaveHistoryNotifier,
     builder: (_, v, __) => SwitchListTile(
-      title:    const Text('Auto-save'),
-      subtitle: const Text('Save every test to history'),
-      value:    v,
+      title:     const Text('Auto-save results'),
+      subtitle:  const Text('Automatically add each test to the logs'),
+      value:     v,
       onChanged: setAutoSave,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     ),
   );
 }
@@ -509,35 +620,35 @@ class _ClearHistoryTile extends StatelessWidget {
       leading: Icon(Icons.delete_sweep_outlined, color: t.colorScheme.error),
       title: Text('Clear all logs',
           style: TextStyle(color: t.colorScheme.error)),
-      subtitle: Text(
-          'Permanently delete all saved results',
+      subtitle: Text('Permanently delete all saved results',
           style: t.textTheme.bodySmall?.copyWith(
-              color: t.colorScheme.onSurface.withOpacity(0.5))),
+              color: t.colorScheme.onSurface.withOpacity(0.45))),
       onTap: () async {
         final ok = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
             title:   const Text('Clear logs'),
-            content: const Text('Delete all results? This cannot be undone.'),
+            content: const Text(
+                'Delete all results? This cannot be undone.'),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel')),
               TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: Text('Delete',
-                    style: TextStyle(color: t.colorScheme.error)),
-              ),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text('Delete',
+                      style: TextStyle(
+                          color: t.colorScheme.error))),
             ],
           ),
         );
         if (ok == true) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.remove('speed_history');
+          final p = await SharedPreferences.getInstance();
+          await p.remove('speed_history');
         }
       },
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     );
   }
 }
