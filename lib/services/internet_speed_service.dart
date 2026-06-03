@@ -10,7 +10,7 @@ class SpeedServer {
   final String provider;
   final String flag;
   final String downloadUrl;
-  // true = works on Flutter Web (server has CORS headers)
+  // true = works in browser (server has CORS headers)
   final bool corsCompatible;
 
   const SpeedServer({
@@ -29,88 +29,88 @@ class SpeedServer {
 
 class InternetSpeedService {
   static const List<SpeedServer> servers = [
-    // ── CORS-compatible servers (web + native) ─────────────────────────────
+    // CORS-compatible servers — work on web and native
     SpeedServer(
-      name: 'Cloudflare Global',
-      location: 'Anycast, Global',
-      provider: 'Cloudflare',
-      flag: '🌐',
-      downloadUrl: 'https://speed.cloudflare.com/__down?bytes=104857600',
-      corsCompatible: true,
+      name:            'Cloudflare Global',
+      location:        'Anycast, Global',
+      provider:        'Cloudflare',
+      flag:            '🌐',
+      downloadUrl:     'https://speed.cloudflare.com/__down?bytes=104857600',
+      corsCompatible:  true,
     ),
     SpeedServer(
-      name: 'Cloudflare 10 MB',
-      location: 'Anycast, Global',
-      provider: 'Cloudflare',
-      flag: '🌐',
-      downloadUrl: 'https://speed.cloudflare.com/__down?bytes=10485760',
-      corsCompatible: true,
+      name:            'Cloudflare 10 MB',
+      location:        'Anycast, Global',
+      provider:        'Cloudflare',
+      flag:            '🌐',
+      downloadUrl:     'https://speed.cloudflare.com/__down?bytes=10485760',
+      corsCompatible:  true,
     ),
 
-    // ── Native-only servers (no CORS) ──────────────────────────────────────
+    // Native-only servers — no CORS, blocked in browsers
     SpeedServer(
-      name: 'Paris',
-      location: 'Paris, FR',
-      provider: 'Hetzner',
-      flag: '🇫🇷',
+      name:        'Paris',
+      location:    'Paris, FR',
+      provider:    'Hetzner',
+      flag:        '🇫🇷',
       downloadUrl: 'https://speed.hetzner.de/100MB.bin',
     ),
     SpeedServer(
-      name: 'Falkenstein',
-      location: 'Falkenstein, DE',
-      provider: 'Hetzner',
-      flag: '🇩🇪',
+      name:        'Falkenstein',
+      location:    'Falkenstein, DE',
+      provider:    'Hetzner',
+      flag:        '🇩🇪',
       downloadUrl: 'https://fsn1-speed.hetzner.com/100MB.bin',
     ),
     SpeedServer(
-      name: 'Nuremberg',
-      location: 'Nuremberg, DE',
-      provider: 'Hetzner',
-      flag: '🇩🇪',
+      name:        'Nuremberg',
+      location:    'Nuremberg, DE',
+      provider:    'Hetzner',
+      flag:        '🇩🇪',
       downloadUrl: 'https://nbg1-speed.hetzner.com/100MB.bin',
     ),
     SpeedServer(
-      name: 'Helsinki',
-      location: 'Helsinki, FI',
-      provider: 'Hetzner',
-      flag: '🇫🇮',
+      name:        'Helsinki',
+      location:    'Helsinki, FI',
+      provider:    'Hetzner',
+      flag:        '🇫🇮',
       downloadUrl: 'https://hel1-speed.hetzner.com/100MB.bin',
     ),
     SpeedServer(
-      name: 'Ashburn',
-      location: 'Ashburn, US',
-      provider: 'Hetzner',
-      flag: '🇺🇸',
+      name:        'Ashburn',
+      location:    'Ashburn, US',
+      provider:    'Hetzner',
+      flag:        '🇺🇸',
       downloadUrl: 'https://ash-speed.hetzner.com/100MB.bin',
     ),
     SpeedServer(
-      name: 'Hillsboro',
-      location: 'Hillsboro, US',
-      provider: 'Hetzner',
-      flag: '🇺🇸',
+      name:        'Hillsboro',
+      location:    'Hillsboro, US',
+      provider:    'Hetzner',
+      flag:        '🇺🇸',
       downloadUrl: 'https://hil-speed.hetzner.com/100MB.bin',
     ),
     SpeedServer(
-      name: 'Singapore',
-      location: 'Singapore, SG',
-      provider: 'Hetzner',
-      flag: '🇸🇬',
+      name:        'Singapore',
+      location:    'Singapore, SG',
+      provider:    'Hetzner',
+      flag:        '🇸🇬',
       downloadUrl: 'https://sin-speed.hetzner.com/100MB.bin',
     ),
     SpeedServer(
-      name: 'Paris',
-      location: 'Paris, FR',
-      provider: 'OVH',
-      flag: '🇫🇷',
+      name:        'Paris',
+      location:    'Paris, FR',
+      provider:    'OVH',
+      flag:        '🇫🇷',
       downloadUrl: 'https://proof.ovh.net/files/100Mb.dat',
     ),
   ];
 
-  // Only show CORS-compatible servers when running in a browser
+  // On web, only return CORS-compatible servers
   static List<SpeedServer> get availableServers =>
       kIsWeb ? servers.where((s) => s.corsCompatible).toList() : servers;
 
-  // If on web, fall back to the first CORS-compatible server
+  // If running in browser, fall back to the first CORS-compatible server
   static int resolveServerIndex(int index) {
     if (!kIsWeb) return index.clamp(0, servers.length - 1);
     final available = availableServers;
@@ -123,7 +123,7 @@ class InternetSpeedService {
   static const Duration _connectTimeout = Duration(seconds: 10);
   static const Duration _streamTimeout  = Duration(seconds: 90);
 
-  // ── Auto-detect location and ISP from the device's public IP ──────────────
+  // Auto-detect city and ISP from the device's public IP.
   // Tries three providers in order; returns the first successful result.
   static Future<({String location, String isp})> getLocationAndIsp() async {
     // 1. ip-api.com — most reliable free option (45 req/min, no key)
@@ -138,7 +138,7 @@ class InternetSpeedService {
           final city    = data['city']        as String? ?? '';
           final country = data['countryCode'] as String? ?? '';
           final isp     = data['isp']         as String? ?? '';
-          final loc = [city, country].where((s) => s.isNotEmpty).join(', ');
+          final loc     = [city, country].where((s) => s.isNotEmpty).join(', ');
           if (loc.isNotEmpty) return (location: loc, isp: isp);
         }
       }
@@ -155,7 +155,7 @@ class InternetSpeedService {
         final country = data['country_code'] as String? ?? '';
         final org     = data['org']          as String? ?? '';
         final isp     = org.replaceAll(RegExp(r'^AS\d+\s*'), '');
-        final loc = [city, country].where((s) => s.isNotEmpty).join(', ');
+        final loc     = [city, country].where((s) => s.isNotEmpty).join(', ');
         if (loc.isNotEmpty) return (location: loc, isp: isp);
       }
     } catch (_) {}
@@ -171,7 +171,7 @@ class InternetSpeedService {
         final country = data['country'] as String? ?? '';
         final org     = data['org']     as String? ?? '';
         final isp     = org.replaceAll(RegExp(r'^AS\d+\s*'), '');
-        final loc = [city, country].where((s) => s.isNotEmpty).join(', ');
+        final loc     = [city, country].where((s) => s.isNotEmpty).join(', ');
         return (location: loc, isp: isp);
       }
     } catch (_) {}
@@ -179,12 +179,33 @@ class InternetSpeedService {
     return (location: '', isp: '');
   }
 
-  // ── Single ping — returns ms, or 999 if it fails ──────────────────────────
+  // Quick reachability check with a short 3-second timeout.
+  // Used by the auto-fallback logic to skip unreachable servers fast.
+  Future<bool> quickReachable(int serverIndex) async {
+    final idx    = resolveServerIndex(serverIndex);
+    final server = servers[idx];
+    final client = http.Client();
+    try {
+      final request = http.Request('GET', Uri.parse(server.pingUrl));
+      if (!kIsWeb) request.headers['Range'] = 'bytes=0-0';
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 3));
+      await response.stream.drain<void>();
+      return response.statusCode == 200 || response.statusCode == 206;
+    } catch (_) {
+      return false;
+    } finally {
+      client.close();
+    }
+  }
+
+  // Single ping — returns latency in ms, or 999 on failure
   Future<int> testPing(int serverIndex) async {
     final resolvedIndex = resolveServerIndex(serverIndex);
-    final server = servers[resolvedIndex];
-    final client = http.Client();
-    final sw = Stopwatch()..start();
+    final server        = servers[resolvedIndex];
+    final client        = http.Client();
+    final sw            = Stopwatch()..start();
     try {
       final request = http.Request('GET', Uri.parse(server.pingUrl));
       if (!kIsWeb) request.headers['Range'] = 'bytes=0-0';
@@ -206,10 +227,10 @@ class InternetSpeedService {
     }
   }
 
-  // ── Ping 5 times — returns average ping + jitter (std dev) ────────────────
+  // 5 pings — returns average ping and jitter (standard deviation)
   Future<({int ping, int jitter})> testPingWithJitter(int serverIndex) async {
-    const count = 5;
-    final pings = <int>[];
+    const count  = 5;
+    final pings  = <int>[];
 
     for (int i = 0; i < count; i++) {
       pings.add(await testPing(serverIndex));
@@ -233,7 +254,8 @@ class InternetSpeedService {
     );
   }
 
-  // ── Download — streams speed readings for durationSecs seconds ────────────
+  // Download speed test — streams Mb/s readings for durationSecs seconds.
+  // Pass durationSecs = 0 to run for up to 10 minutes (infinite mode).
   Stream<double> testDownloadSpeed({
     required int serverIndex,
     required int durationSecs,
@@ -242,7 +264,7 @@ class InternetSpeedService {
     final controller    = StreamController<double>();
     _downloadInternal(
       serverIndex:  resolvedIndex,
-      durationSecs: durationSecs,
+      durationSecs: durationSecs == 0 ? 600 : durationSecs, // 0 = 10 min cap
       controller:   controller,
     );
     return controller.stream;
@@ -322,27 +344,27 @@ class InternetSpeedService {
     }
   }
 
-  // ── Upload — streams speed readings for durationSecs seconds ──────────────
+  // Upload speed test — streams Mb/s readings for durationSecs seconds.
+  // Pass durationSecs = 0 to run for up to 10 minutes (infinite mode).
   // Uses Cloudflare's __up endpoint with adaptive payload sizing.
-  // Emits the cumulative average upload speed (Mb/s) after each request.
   Stream<double> testUploadSpeed({required int durationSecs}) async* {
     const uploadUrl = 'https://speed.cloudflare.com/__up';
-    final sw  = Stopwatch()..start();
-    final maxMs = durationSecs * 1000;
+    final sw        = Stopwatch()..start();
+    final maxMs     = (durationSecs == 0 ? 600 : durationSecs) * 1000;
     int totalSent   = 0;
-    int payloadSize = 1 * 1024 * 1024; // start with 1 MB, adapt over time
+    int payloadSize = 1 * 1024 * 1024; // start at 1 MB, adapted per round
 
     while (sw.elapsedMilliseconds < maxMs) {
       if (maxMs - sw.elapsedMilliseconds < 200) break;
 
       final payload = List<int>.generate(payloadSize, (i) => i & 0xFF);
-      final t0 = sw.elapsedMilliseconds;
+      final t0      = sw.elapsedMilliseconds;
 
       try {
         final resp = await http
             .post(
               Uri.parse(uploadUrl),
-              body: payload,
+              body:    payload,
               headers: {'Content-Type': 'application/octet-stream'},
             )
             .timeout(_streamTimeout);

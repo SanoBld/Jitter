@@ -8,7 +8,7 @@ import '../app_state.dart';
 import '../services/internet_speed_service.dart';
 import 'settings_screen.dart';
 
-// ─── Performance grade ─────────────────────────────────────────────────────
+// Performance grade based on download speed
 enum _PerfGrade { excellent, veryGood, good, fair, slow, poor }
 
 extension _PerfGradeX on _PerfGrade {
@@ -55,7 +55,7 @@ _PerfGrade _gradeDl(double mbps) {
   return _PerfGrade.poor;
 }
 
-// Ping color — green is good, red is bad
+// Green = low latency, red = high latency
 Color _pingColorFor(int ms, BuildContext context) {
   if (ms == 0) return Theme.of(context).colorScheme.onSurface.withOpacity(0.3);
   if (ms <= 30)  return const Color(0xFF2E7D32);
@@ -64,7 +64,7 @@ Color _pingColorFor(int ms, BuildContext context) {
   return Theme.of(context).colorScheme.error;
 }
 
-// Jitter color — low jitter is stable (green), high jitter is bad (red)
+// Green = stable, red = unstable
 Color _jitterColorFor(int ms, BuildContext context) {
   if (ms == 0)  return Theme.of(context).colorScheme.onSurface.withOpacity(0.3);
   if (ms <= 10) return const Color(0xFF2E7D32);
@@ -73,7 +73,7 @@ Color _jitterColorFor(int ms, BuildContext context) {
   return Theme.of(context).colorScheme.error;
 }
 
-// ─── Log entry — one result saved to history ──────────────────────────────
+// One entry saved to history
 class _LogEntry {
   final String timestamp;
   final String flag;
@@ -129,6 +129,7 @@ class _LogEntry {
     unit:           j['unit']         as String,
   );
 
+  // Parse old plain-text log format for backwards compatibility
   static _LogEntry? tryFromLegacyString(String raw) {
     try {
       final parts = raw.split('  |  ');
@@ -167,7 +168,8 @@ class _IndexedEntry {
   const _IndexedEntry(this.entry, this.index);
 }
 
-const _kDurationSteps = [5, 10, 15, 20, 30, 60];
+// Available duration steps in seconds. 0 = infinite (runs until stopped)
+const _kDurationSteps = [5, 10, 15, 20, 30, 60, 0];
 
 // ═══════════════════════════════════════════════════════════════════════════
 class HomeScreen extends StatefulWidget {
@@ -182,6 +184,7 @@ class _HomeScreenState extends State<HomeScreen>
   final _svc = InternetSpeedService();
   int _tabIndex = 0;
 
+  // Live test values
   final _speedNf    = ValueNotifier<double>(0.0);
   final _pingNf     = ValueNotifier<int>(0);
   final _jitterNf   = ValueNotifier<int>(0);
@@ -192,6 +195,9 @@ class _HomeScreenState extends State<HomeScreen>
   final _pointsNf   = ValueNotifier<List<double>>([]);
   final _progressNf = ValueNotifier<double>(0.0);
   final _errorNf    = ValueNotifier<String?>(null);
+
+  // Set to true to abort the current test at the next loop iteration
+  bool _stopRequested = false;
 
   late AnimationController _pulse;
   List<_LogEntry> _history = [];
@@ -223,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  // ── Load / save history ────────────────────────────────────────────────
+  // Load history from disk
   Future<void> _loadHistory() async {
     final p   = await SharedPreferences.getInstance();
     final raw = p.getStringList('speed_history') ?? [];
@@ -258,7 +264,7 @@ class _HomeScreenState extends State<HomeScreen>
     await p.remove('speed_history');
   }
 
-  // ── Auto-detect location + ISP ────────────────────────────────────────
+  // Fetch city and ISP from the public IP and update notifiers
   Future<void> _fetchAndUpdateLocation() async {
     locationFetchingNotifier.value = true;
     try {
@@ -272,8 +278,9 @@ class _HomeScreenState extends State<HomeScreen>
 
   String get _unit => speedUnitMbpsNotifier.value ? 'Mb/s' : 'MB/s';
 
-  // ── Run full speed test ────────────────────────────────────────────────
+  // ── Run full speed test ────────────────────────────────────────────────────
   Future<void> _runTest() async {
+    _stopRequested    = false;
     _testingNf.value  = true;
     _errorNf.value    = null;
     _speedNf.value    = 0;
@@ -286,88 +293,63 @@ class _HomeScreenState extends State<HomeScreen>
     _phaseNf.value    = 'LOCATING';
 
     try {
-      // 1. Refresh location + ISP
       await _fetchAndUpdateLocation();
       _progressNf.value = 0.04;
+      if (_stopRequested) { _phaseNf.value = 'STOPPED'; return; }
 
-      // 2. Resolve server
-      final rawIdx = selectedServerNotifier.value;
-      final srv    = InternetSpeedService.resolveServerIndex(rawIdx);
-      final durSecs = testDurationSecsNotifier.value;
+      // Build the ordered list of server indices to try
+      final rawIdx   = selectedServerNotifier.value;
+      final startSrv = InternetSpeedService.resolveServerIndex(rawIdx);
+      final total    = InternetSpeedService.servers.length;
+      // All indices starting from the selected server, wrapping around
+      final allOrder = List.generate(total, (i) => (startSrv + i) % total);
+      // On web, skip servers without CORS support
+      final filtered = kIsWeb
+          ? allOrder.where(
+              (i) => InternetSpeedService.servers[i].corsCompatible).toList()
+          : allOrder;
 
-      // 3. Ping + jitter
-      _phaseNf.value = 'PING';
-      final pingResult  = await _svc.testPingWithJitter(srv);
-      _pingNf.value     = pingResult.ping;
-      _jitterNf.value   = pingResult.jitter;
-      _progressNf.value = 0.20;
+      // If fallback is off, only try the first candidate
+      final candidates = autoFallbackNotifier.value
+          ? filtered
+          : (filtered.isEmpty ? [startSrv] : [filtered.first]);
 
-      // 4. Download
-      _phaseNf.value    = 'DOWNLOAD';
-      _pointsNf.value   = [];
+      bool   success   = false;
+      String lastError = 'No server available';
 
-      final dlStart   = DateTime.now();
-      Timer? progTimer;
-      progTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-        final elapsed = DateTime.now().difference(dlStart).inMilliseconds;
-        _progressNf.value =
-            (0.20 + 0.50 * (elapsed / (durSecs * 1000))).clamp(0.20, 0.70);
-      });
+      for (final srv in candidates) {
+        if (_stopRequested) break;
 
-      await for (final mbps
-          in _svc.testDownloadSpeed(serverIndex: srv, durationSecs: durSecs)) {
-        _speedNf.value = mbps;
-        _dlNf.value    = mbps;
-        final pts = List<double>.from(_pointsNf.value)..add(mbps);
-        if (pts.length > 60) pts.removeAt(0);
-        _pointsNf.value = pts;
+        // Quick reachability check before committing to a full test.
+        // This allows fast skipping of dead servers (3 s timeout).
+        if (autoFallbackNotifier.value && candidates.length > 1) {
+          _phaseNf.value = 'CHECKING…';
+          final reachable = await _svc.quickReachable(srv);
+          if (!reachable) continue; // skip to next server
+          if (_stopRequested) break;
+        }
+
+        try {
+          await _runPhases(srv);
+          success = true;
+          break;
+        } catch (e) {
+          lastError = e.toString();
+          // If more servers to try, show a brief transition phase
+          if (candidates.last != srv && !_stopRequested) {
+            _phaseNf.value = 'SWITCHING…';
+            await Future.delayed(const Duration(milliseconds: 400));
+          }
+        }
       }
-      progTimer?.cancel();
-      _progressNf.value = 0.70;
 
-      // 5. Upload — streaming, just like download
-      _phaseNf.value  = 'UPLOAD';
-      _speedNf.value  = 0;
-      _pointsNf.value = [];
-
-      final ulStart = DateTime.now();
-      Timer? ulProgTimer;
-      ulProgTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-        final elapsed = DateTime.now().difference(ulStart).inMilliseconds;
-        _progressNf.value =
-            (0.70 + 0.30 * (elapsed / (durSecs * 1000))).clamp(0.70, 1.0);
-      });
-
-      await for (final mbps
-          in _svc.testUploadSpeed(durationSecs: durSecs)) {
-        _speedNf.value = mbps;
-        _ulNf.value    = mbps;
-        final pts = List<double>.from(_pointsNf.value)..add(mbps);
-        if (pts.length > 60) pts.removeAt(0);
-        _pointsNf.value = pts;
-      }
-      ulProgTimer?.cancel();
-      _progressNf.value = 1.0;
-      _phaseNf.value    = 'COMPLETED';
-
-      // 6. Save result
-      if (autoSaveHistoryNotifier.value) {
-        final server = InternetSpeedService.servers[srv];
-        final entry  = _LogEntry(
-          timestamp:      DateTime.now().toLocal().toString().substring(0, 16),
-          flag:           server.flag,
-          server:         server.name,
-          provider:       server.provider,
-          serverLocation: server.location,
-          userLocation:   userLocationNotifier.value,
-          dl:             _dlNf.value,
-          ul:             _ulNf.value,
-          ping:           _pingNf.value,
-          jitter:         _jitterNf.value,
-          unit:           _unit,
-        );
-        setState(() => _history.insert(0, entry));
-        await _saveHistory();
+      if (_stopRequested) {
+        _phaseNf.value    = 'STOPPED';
+        _progressNf.value = 0;
+      } else if (!success) {
+        _phaseNf.value    = 'ERROR';
+        _errorNf.value    = _friendlyError(lastError);
+        _progressNf.value = 0;
       }
     } catch (e) {
       _phaseNf.value    = 'ERROR';
@@ -378,6 +360,109 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  // Run ping → download → upload for one server.
+  // Throws on network errors so the caller can try the next server.
+  Future<void> _runPhases(int srv) async {
+    final durSecs   = testDurationSecsNotifier.value; // 0 = infinite
+    final isInfinite = durSecs == 0;
+
+    // ── Ping + jitter ────────────────────────────────────────────────────────
+    _phaseNf.value = 'PING';
+    final pingResult = await _svc.testPingWithJitter(srv);
+    if (_stopRequested) return;
+    if (pingResult.ping == 999) throw Exception('Server unreachable (ping timeout)');
+    _pingNf.value   = pingResult.ping;
+    _jitterNf.value = pingResult.jitter;
+    _progressNf.value = 0.20;
+
+    // ── Download ─────────────────────────────────────────────────────────────
+    _phaseNf.value  = 'DOWNLOAD';
+    _pointsNf.value = [];
+    final dlStart   = DateTime.now();
+    Timer? progTimer;
+
+    if (!isInfinite) {
+      // Advance progress bar proportionally to elapsed time
+      progTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
+        if (_stopRequested) { progTimer?.cancel(); return; }
+        final elapsed = DateTime.now().difference(dlStart).inMilliseconds;
+        _progressNf.value =
+            (0.20 + 0.50 * (elapsed / (durSecs * 1000))).clamp(0.20, 0.70);
+      });
+    }
+
+    await for (final mbps in _svc.testDownloadSpeed(
+        serverIndex: srv, durationSecs: durSecs)) {
+      if (_stopRequested) break;
+      _speedNf.value = mbps;
+      _dlNf.value    = mbps;
+      final pts = List<double>.from(_pointsNf.value)..add(mbps);
+      if (pts.length > 60) pts.removeAt(0);
+      _pointsNf.value = pts;
+      // In infinite mode, pulse progress bar back and forth between 20–70 %
+      if (isInfinite) {
+        _progressNf.value = 0.20 + 0.50 * _pulse.value;
+      }
+    }
+    progTimer?.cancel();
+    if (_stopRequested) return;
+    _progressNf.value = 0.70;
+
+    // ── Upload ───────────────────────────────────────────────────────────────
+    _phaseNf.value  = 'UPLOAD';
+    _speedNf.value  = 0;
+    _pointsNf.value = [];
+    final ulStart   = DateTime.now();
+    Timer? ulProgTimer;
+
+    if (!isInfinite) {
+      ulProgTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
+        if (_stopRequested) { ulProgTimer?.cancel(); return; }
+        final elapsed = DateTime.now().difference(ulStart).inMilliseconds;
+        _progressNf.value =
+            (0.70 + 0.30 * (elapsed / (durSecs * 1000))).clamp(0.70, 1.0);
+      });
+    }
+
+    await for (final mbps in _svc.testUploadSpeed(durationSecs: durSecs)) {
+      if (_stopRequested) break;
+      _speedNf.value = mbps;
+      _ulNf.value    = mbps;
+      final pts = List<double>.from(_pointsNf.value)..add(mbps);
+      if (pts.length > 60) pts.removeAt(0);
+      _pointsNf.value = pts;
+      if (isInfinite) {
+        _progressNf.value = 0.70 + 0.30 * _pulse.value;
+      }
+    }
+    ulProgTimer?.cancel();
+    if (_stopRequested) return;
+
+    _progressNf.value = 1.0;
+    _phaseNf.value    = 'COMPLETED';
+
+    // Save result to history if auto-save is on
+    if (autoSaveHistoryNotifier.value) {
+      final server = InternetSpeedService.servers[srv];
+      final entry  = _LogEntry(
+        timestamp:      DateTime.now().toLocal().toString().substring(0, 16),
+        flag:           server.flag,
+        server:         server.name,
+        provider:       server.provider,
+        serverLocation: server.location,
+        userLocation:   userLocationNotifier.value,
+        dl:             _dlNf.value,
+        ul:             _ulNf.value,
+        ping:           _pingNf.value,
+        jitter:         _jitterNf.value,
+        unit:           _unit,
+      );
+      setState(() => _history.insert(0, entry));
+      await _saveHistory();
+    }
+  }
+
+  // Convert raw error messages to user-friendly text
   String _friendlyError(String raw) {
     if (raw.contains('Failed to fetch') || raw.contains('CORS') ||
         raw.contains('cross-origin') || raw.contains('XMLHttpRequest'))
@@ -392,10 +477,12 @@ class _HomeScreenState extends State<HomeScreen>
       return 'Timeout — server not responding.\nTry a different server.';
     if (raw.contains('HandshakeException'))
       return 'SSL error — check your device date/time.';
+    if (raw.contains('unreachable'))
+      return 'Server unreachable.\nEnable auto-fallback or pick another server.';
     return 'Error: $raw';
   }
 
-  // ── Root build ─────────────────────────────────────────────────────────
+  // ── Root build ─────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -438,7 +525,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // DASHBOARD
+  // DASHBOARD TAB
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildDashboard(ThemeData t) {
     return Padding(
@@ -457,9 +544,11 @@ class _HomeScreenState extends State<HomeScreen>
           _buildLiveChart(t),
           const SizedBox(height: 12),
           _buildStatsRow(t),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _buildDurationChips(t),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
+          _buildQuickOptions(t),   // server picker + unit toggle
+          const SizedBox(height: 10),
           _buildStartButton(t),
           const SizedBox(height: 4),
         ],
@@ -467,7 +556,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Top bar — app name, location chip, status badge ────────────────────
+  // ── Top bar — app name, location chip, status badge ─────────────────────
   Widget _buildTopBar(ThemeData t) {
     return Row(children: [
       Text('JITTER', style: t.textTheme.titleSmall?.copyWith(
@@ -477,7 +566,7 @@ class _HomeScreenState extends State<HomeScreen>
       )),
       const Spacer(),
 
-      // Location chip — tapping it re-fetches location + ISP
+      // Location chip — tap to refresh
       ValueListenableBuilder<bool>(
         valueListenable: locationFetchingNotifier,
         builder: (_, fetching, __) => ValueListenableBuilder<String>(
@@ -498,7 +587,6 @@ class _HomeScreenState extends State<HomeScreen>
                       color: t.colorScheme.secondary.withOpacity(0.22)),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  // Spinner when fetching, pin icon otherwise
                   SizedBox(
                     width: 12, height: 12,
                     child: fetching
@@ -545,7 +633,7 @@ class _HomeScreenState extends State<HomeScreen>
 
       const SizedBox(width: 8),
 
-      // Status badge — shows current phase with pulsing dot
+      // Status badge with pulsing dot
       ValueListenableBuilder<bool>(
         valueListenable: _testingNf,
         builder: (_, testing, __) => ValueListenableBuilder<String>(
@@ -584,7 +672,7 @@ class _HomeScreenState extends State<HomeScreen>
     ]);
   }
 
-  // ── Gauge — arc + center speed display ─────────────────────────────────
+  // ── Gauge — arc + center speed display ───────────────────────────────────
   Widget _buildGaugeArea(ThemeData t) {
     return Center(
       child: LayoutBuilder(builder: (_, box) {
@@ -680,7 +768,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Phase pills — PING / DOWNLOAD / UPLOAD ──────────────────────────────
+  // ── Phase pills — PING / DOWNLOAD / UPLOAD ───────────────────────────────
   Widget _buildPhasePills(ThemeData t) {
     const phases = ['PING', 'DOWNLOAD', 'UPLOAD'];
     return ValueListenableBuilder<String>(
@@ -735,22 +823,42 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Progress bar ──────────────────────────────────────────────────────────
+  // ── Progress bar — indeterminate in infinite mode ────────────────────────
   Widget _buildProgressBar(ThemeData t) {
     return ValueListenableBuilder<double>(
       valueListenable: _progressNf,
-      builder: (_, progress, __) => TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0.0, end: progress),
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeOut,
-        builder: (_, anim, __) => ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value:            anim,
-            minHeight:        5,
-            backgroundColor:  t.colorScheme.onSurface.withOpacity(0.07),
-            valueColor:       AlwaysStoppedAnimation(t.colorScheme.primary),
-          ),
+      builder: (_, progress, __) => ValueListenableBuilder<bool>(
+        valueListenable: _testingNf,
+        builder: (_, testing, __) => ValueListenableBuilder<String>(
+          valueListenable: _phaseNf,
+          builder: (_, phase, __) {
+            // Use indeterminate bar during active phases in infinite mode
+            final isInfinite = testDurationSecsNotifier.value == 0;
+            final activePhase =
+                phase == 'DOWNLOAD' || phase == 'UPLOAD' || phase == 'PING';
+            final indeterminate = isInfinite && testing && activePhase;
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: indeterminate
+                  ? LinearProgressIndicator(
+                      minHeight:       5,
+                      backgroundColor: t.colorScheme.onSurface.withOpacity(0.07),
+                      valueColor:      AlwaysStoppedAnimation(t.colorScheme.primary),
+                    )
+                  : TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0.0, end: progress),
+                      duration: const Duration(milliseconds: 500),
+                      curve: Curves.easeOut,
+                      builder: (_, anim, __) => LinearProgressIndicator(
+                        value:           anim,
+                        minHeight:       5,
+                        backgroundColor: t.colorScheme.onSurface.withOpacity(0.07),
+                        valueColor:
+                            AlwaysStoppedAnimation(t.colorScheme.primary),
+                      ),
+                    ),
+            );
+          },
         ),
       ),
     );
@@ -765,7 +873,6 @@ class _HomeScreenState extends State<HomeScreen>
         builder: (_, pts, __) => ValueListenableBuilder<String>(
           valueListenable: _phaseNf,
           builder: (_, phase, __) {
-            // Use secondary color for upload phase
             final color = phase == 'UPLOAD'
                 ? t.colorScheme.secondary
                 : t.colorScheme.primary;
@@ -793,7 +900,6 @@ class _HomeScreenState extends State<HomeScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          // Download
           _statBlock(
             icon:      Icons.arrow_downward_rounded,
             label:     'DOWN',
@@ -815,10 +921,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             t: t,
           ),
-
           _vDivider(t),
-
-          // Upload
           _statBlock(
             icon:      Icons.arrow_upward_rounded,
             label:     'UP',
@@ -840,10 +943,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             t: t,
           ),
-
           _vDivider(t),
-
-          // Ping
           _statBlock(
             icon:      Icons.network_ping_rounded,
             label:     'PING',
@@ -857,10 +957,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             t: t,
           ),
-
           _vDivider(t),
-
-          // Jitter
           _statBlock(
             icon:      Icons.waves_rounded,
             label:     'JITTER',
@@ -925,7 +1022,11 @@ class _HomeScreenState extends State<HomeScreen>
               child: Row(
                 children: _kDurationSteps.map((secs) {
                   final sel   = secs == cur;
-                  final label = secs == 60 ? '1 min' : '${secs}s';
+                  final label = secs == 0
+                      ? '∞'
+                      : secs == 60
+                          ? '1 min'
+                          : '${secs}s';
                   return Padding(
                     padding: const EdgeInsets.only(right: 6),
                     child: GestureDetector(
@@ -967,7 +1068,175 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Start button ──────────────────────────────────────────────────────────
+  // ── Quick options row — server chip + unit toggle ─────────────────────────
+  Widget _buildQuickOptions(ThemeData t) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _testingNf,
+      builder: (_, testing, __) => Row(children: [
+        // Server chip — opens bottom sheet picker
+        ValueListenableBuilder<int>(
+          valueListenable: selectedServerNotifier,
+          builder: (_, si, __) {
+            final srv = InternetSpeedService.servers[
+                InternetSpeedService.resolveServerIndex(si)];
+            return GestureDetector(
+              onTap: testing ? null : _showServerSheet,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: t.colorScheme.onSurface.withOpacity(testing ? 0.03 : 0.06),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: t.colorScheme.onSurface.withOpacity(0.09)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(srv.flag, style: const TextStyle(fontSize: 13)),
+                  const SizedBox(width: 5),
+                  Text(srv.name,
+                      style: t.textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: t.colorScheme.onSurface
+                            .withOpacity(testing ? 0.25 : 0.7),
+                      )),
+                  const SizedBox(width: 3),
+                  Icon(Icons.expand_more_rounded,
+                      size: 13,
+                      color: t.colorScheme.onSurface
+                          .withOpacity(testing ? 0.2 : 0.4)),
+                ]),
+              ),
+            );
+          },
+        ),
+        const Spacer(),
+        // Unit toggle — Mb/s vs MB/s
+        ValueListenableBuilder<bool>(
+          valueListenable: speedUnitMbpsNotifier,
+          builder: (_, isMbps, __) => Row(mainAxisSize: MainAxisSize.min, children: [
+            _unitChip('Mb/s', isMbps,
+                testing ? null : () => setSpeedUnit(true), t),
+            const SizedBox(width: 4),
+            _unitChip('MB/s', !isMbps,
+                testing ? null : () => setSpeedUnit(false), t),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  // Small toggle chip used for the unit selector
+  Widget _unitChip(
+      String label, bool selected, VoidCallback? onTap, ThemeData t) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected
+              ? t.colorScheme.primary.withOpacity(0.12)
+              : t.colorScheme.onSurface.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected
+                ? t.colorScheme.primary.withOpacity(0.4)
+                : t.colorScheme.onSurface.withOpacity(0.08),
+          ),
+        ),
+        child: Text(label,
+            style: t.textTheme.labelSmall?.copyWith(
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w400,
+              color: selected
+                  ? t.colorScheme.primary
+                  : t.colorScheme.onSurface.withOpacity(onTap == null ? 0.2 : 0.5),
+            )),
+      ),
+    );
+  }
+
+  // Bottom sheet with the full server list
+  void _showServerSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final t       = Theme.of(ctx);
+        final servers = InternetSpeedService.availableServers;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Text('Server', style: t.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold, letterSpacing: 1)),
+                  const Spacer(),
+                  // Auto-fallback toggle inline in the sheet
+                  ValueListenableBuilder<bool>(
+                    valueListenable: autoFallbackNotifier,
+                    builder: (_, v, __) => Row(children: [
+                      Text('Auto-fallback',
+                          style: t.textTheme.labelSmall?.copyWith(
+                              color: t.colorScheme.onSurface.withOpacity(0.55))),
+                      const SizedBox(width: 6),
+                      Switch(
+                        value:     v,
+                        onChanged: setAutoFallback,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ]),
+                  ),
+                ]),
+                const SizedBox(height: 12),
+                ...List.generate(servers.length, (i) {
+                  final srv     = servers[i];
+                  // Map back to the full servers list index
+                  final realIdx = InternetSpeedService.servers.indexOf(srv);
+                  return ValueListenableBuilder<int>(
+                    valueListenable: selectedServerNotifier,
+                    builder: (_, si, __) {
+                      final selected = si == realIdx;
+                      return ListTile(
+                        leading: Text(srv.flag,
+                            style: const TextStyle(fontSize: 20)),
+                        title: Text(srv.name),
+                        subtitle: Text('${srv.location}  —  ${srv.provider}',
+                            style: t.textTheme.bodySmall?.copyWith(
+                                color: t.colorScheme.onSurface.withOpacity(0.5))),
+                        trailing: selected
+                            ? Icon(Icons.check_rounded,
+                                color: t.colorScheme.primary)
+                            : null,
+                        selected: selected,
+                        selectedTileColor:
+                            t.colorScheme.primary.withOpacity(0.06),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        onTap: () {
+                          setServer(realIdx);
+                          Navigator.pop(ctx);
+                        },
+                      );
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Start / Stop button ───────────────────────────────────────────────────
   Widget _buildStartButton(ThemeData t) {
     return ValueListenableBuilder<bool>(
       valueListenable: _testingNf,
@@ -975,13 +1244,14 @@ class _HomeScreenState extends State<HomeScreen>
         height: 54,
         child: testing
             ? OutlinedButton(
-                onPressed: null,
+                // Tap to request stop — the test loop checks this flag
+                onPressed: () => setState(() => _stopRequested = true),
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(
-                      color: t.colorScheme.onSurface.withOpacity(0.10),
-                      width: 1.5),
+                      color: t.colorScheme.error.withOpacity(0.4), width: 1.5),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(100)),
+                  foregroundColor: t.colorScheme.error,
                 ),
                 child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -990,14 +1260,14 @@ class _HomeScreenState extends State<HomeScreen>
                     width: 14, height: 14,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: t.colorScheme.onSurface.withOpacity(0.25),
+                      color: t.colorScheme.error.withOpacity(0.5),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Text('TESTING…', style: TextStyle(
+                  Text('STOP', style: TextStyle(
                     fontWeight:    FontWeight.bold,
                     letterSpacing: 2.0,
-                    color: t.colorScheme.onSurface.withOpacity(0.25),
+                    color: t.colorScheme.error.withOpacity(0.8),
                   )),
                 ]),
               )
@@ -1017,7 +1287,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Web mode banner ───────────────────────────────────────────────────────
+  // ── Web mode notice ───────────────────────────────────────────────────────
   Widget _webBanner(ThemeData t) => Container(
     margin:  const EdgeInsets.only(bottom: 6),
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
@@ -1064,6 +1334,7 @@ class _HomeScreenState extends State<HomeScreen>
   // HISTORY TAB
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildHistory(ThemeData t) {
+    // Group entries by user location
     final grouped = <String, List<_IndexedEntry>>{};
     for (int i = 0; i < _history.length; i++) {
       final loc = _history[i].userLocation.isEmpty
@@ -1097,9 +1368,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
         ]),
-
         const SizedBox(height: 16),
-
         Expanded(
           child: _history.isEmpty
               ? _emptyLogs(t)
@@ -1148,7 +1417,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ]),
       ),
-
       for (final ie in entries)
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
@@ -1157,7 +1425,6 @@ class _HomeScreenState extends State<HomeScreen>
             onDelete: () => _deleteEntry(ie.index),
           ),
         ),
-
       const SizedBox(height: 6),
     ]);
   }
@@ -1186,7 +1453,6 @@ class _HomeScreenState extends State<HomeScreen>
   );
 
   Future<void> _confirmClearHistory() async {
-    final t  = Theme.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1200,7 +1466,7 @@ class _HomeScreenState extends State<HomeScreen>
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: Text('Delete',
-                style: TextStyle(color: t.colorScheme.error)),
+                style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
           ),
         ],
       ),
@@ -1208,7 +1474,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (ok == true) await _clearHistory();
   }
 
-  // ── Date helpers ──────────────────────────────────────────────────────────
+  // Date and time helpers for log cards
   static String _fmtDate(String ts) {
     try {
       final d = DateTime.parse(ts.length == 16 ? '${ts}:00' : ts);
@@ -1229,6 +1495,7 @@ class _HomeScreenState extends State<HomeScreen>
 // REUSABLE WIDGETS
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Speed value + unit label aligned on baseline
 class _SpeedText extends StatelessWidget {
   final String value;
   final String unit;
@@ -1259,7 +1526,7 @@ class _SpeedText extends StatelessWidget {
   );
 }
 
-// ─── Log Card ─────────────────────────────────────────────────────────────────
+// History log card — swipe left to delete
 class _LogCard extends StatelessWidget {
   final _LogEntry entry;
   final VoidCallback onDelete;
@@ -1299,7 +1566,7 @@ class _LogCard extends StatelessWidget {
         ),
         child: Column(children: [
 
-          // ── Performance banner ────────────────────────────────────────────
+          // Performance grade banner
           Container(
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
             decoration: BoxDecoration(
@@ -1342,7 +1609,7 @@ class _LogCard extends StatelessWidget {
             ]),
           ),
 
-          // ── Server header ─────────────────────────────────────────────────
+          // Server info + timestamp
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
             child: Row(children: [
@@ -1356,7 +1623,6 @@ class _LogCard extends StatelessWidget {
                     style: const TextStyle(fontSize: 17))),
               ),
               const SizedBox(width: 10),
-
               Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1390,7 +1656,6 @@ class _LogCard extends StatelessWidget {
                             color: t.colorScheme.onSurface.withOpacity(0.4))),
                 ],
               )),
-
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 Text(_fmtDate(entry.timestamp),
                     style: t.textTheme.labelSmall?.copyWith(
@@ -1407,7 +1672,7 @@ class _LogCard extends StatelessWidget {
           const SizedBox(height: 10),
           Divider(height: 1, color: t.colorScheme.onSurface.withOpacity(0.06)),
 
-          // ── Metrics row ───────────────────────────────────────────────────
+          // Metrics row
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
             child: Row(children: [
@@ -1474,7 +1739,7 @@ class _LogCard extends StatelessWidget {
   }
 }
 
-// ─── Ping / Jitter pill widget ─────────────────────────────────────────────
+// ── Ping / jitter pill widget ──────────────────────────────────────────────
 class _PingJitterPill extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1512,7 +1777,7 @@ class _PingJitterPill extends StatelessWidget {
   );
 }
 
-// ─── Metric chip — DL / UL display ────────────────────────────────────────
+// ── DL / UL metric chip ────────────────────────────────────────────────────
 class _MetricChip extends StatelessWidget {
   final IconData icon;
   final String value, unit, label;
@@ -1551,7 +1816,7 @@ class _MetricChip extends StatelessWidget {
   }
 }
 
-// ─── Arc gauge painter ─────────────────────────────────────────────────────
+// ── Arc gauge painter ──────────────────────────────────────────────────────
 class _ArcGaugePainter extends CustomPainter {
   final double speedMbps;
   final double maxSpeedMbps;
@@ -1579,6 +1844,7 @@ class _ArcGaugePainter extends CustomPainter {
     const sweepRad = _sweepDeg * pi / 180;
     const strokeW  = 16.0;
 
+    // Background track
     canvas.drawArc(rect, startRad, sweepRad, false,
       Paint()
         ..color       = trackColor
@@ -1593,6 +1859,7 @@ class _ArcGaugePainter extends CustomPainter {
     final (Color c1, Color c2) = _speedColors(speedMbps);
     final sweepActual = sweepRad * progress;
 
+    // Colored arc with gradient
     canvas.drawArc(rect, startRad, sweepActual, false,
       Paint()
         ..style       = PaintingStyle.stroke
@@ -1606,6 +1873,7 @@ class _ArcGaugePainter extends CustomPainter {
         ).createShader(rect),
     );
 
+    // Dot at the end of the arc
     final endAngle = startRad + sweepActual;
     final dx = cx + radius * cos(endAngle);
     final dy = cy + radius * sin(endAngle);
@@ -1617,6 +1885,7 @@ class _ArcGaugePainter extends CustomPainter {
           ..style       = PaintingStyle.stroke
           ..strokeWidth = 2.5);
 
+    // Scale tick marks
     final tickPaint = Paint()
       ..color       = trackColor.withOpacity(0.8)
       ..strokeWidth = 1.5
@@ -1646,7 +1915,7 @@ class _ArcGaugePainter extends CustomPainter {
       old.speedMbps != speedMbps || old.accentColor != accentColor;
 }
 
-// ─── Live speed chart painter ──────────────────────────────────────────────
+// ── Live speed chart painter ───────────────────────────────────────────────
 class _ChartPainter extends CustomPainter {
   final List<double> points;
   final Color color;
@@ -1659,12 +1928,14 @@ class _ChartPainter extends CustomPainter {
     final stepX = size.width / (points.length - 1);
     double y(double v) => size.height - (v / maxV * size.height * 0.88);
 
+    // Smooth curve through all data points
     final line = Path()..moveTo(0, y(points[0]));
     for (int i = 1; i < points.length; i++) {
       final x = i * stepX, px = (i - 1) * stepX, cx = (px + x) / 2;
       line.cubicTo(cx, y(points[i - 1]), cx, y(points[i]), x, y(points[i]));
     }
 
+    // Filled area under the curve
     final fill = Path.from(line)
       ..lineTo(size.width, size.height)
       ..lineTo(0, size.height)

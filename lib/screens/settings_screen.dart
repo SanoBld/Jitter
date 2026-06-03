@@ -16,7 +16,7 @@ class SettingsScreen extends StatelessWidget {
             fontWeight: FontWeight.bold, letterSpacing: 1.5)),
         const SizedBox(height: 24),
 
-        _section('LOCATION',    [const _LocationTile()], t),
+        _section('LOCATION', [const _LocationTile()], t),
         const SizedBox(height: 16),
 
         _section('APPEARANCE', [
@@ -28,13 +28,18 @@ class SettingsScreen extends StatelessWidget {
         ], t),
         const SizedBox(height: 16),
 
-        _section('TEST SERVER',   [const _ServerList()], t),
+        // Server section includes the auto-fallback toggle
+        _section('TEST SERVER', [
+          const _ServerList(),
+          const Divider(height: 1),
+          const _AutoFallbackTile(),
+        ], t),
         const SizedBox(height: 16),
 
         _section('TEST DURATION', [const _DurationSlider()], t),
         const SizedBox(height: 16),
 
-        _section('UNIT',    [const _UnitPicker()], t),
+        _section('UNIT', [const _UnitPicker()], t),
         const SizedBox(height: 16),
 
         _section('HISTORY', [
@@ -56,8 +61,8 @@ class SettingsScreen extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 8),
           child: Text(title, style: t.textTheme.labelSmall?.copyWith(
-              color:      t.colorScheme.primary,
-              fontWeight: FontWeight.bold,
+              color:         t.colorScheme.primary,
+              fontWeight:    FontWeight.bold,
               letterSpacing: 1.5)),
         ),
         Container(
@@ -294,9 +299,9 @@ class _ServerList extends StatelessWidget {
           final s = servers[i];
           return Column(children: [
             RadioListTile<int>(
-              value:       i,
-              groupValue:  selected,
-              onChanged:   (v) => setServer(v!),
+              value:      i,
+              groupValue: selected,
+              onChanged:  (v) => setServer(v!),
               title: Text('${s.flag}  ${s.name}',
                   style: t.textTheme.bodyMedium
                       ?.copyWith(fontWeight: FontWeight.w500)),
@@ -315,26 +320,50 @@ class _ServerList extends StatelessWidget {
   }
 }
 
+// ── Auto-fallback toggle ───────────────────────────────────────────────────
+// When enabled, the app tries the next server if the current one fails
+class _AutoFallbackTile extends StatelessWidget {
+  const _AutoFallbackTile();
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: autoFallbackNotifier,
+    builder: (_, v, __) => SwitchListTile(
+      title:    const Text('Auto-fallback'),
+      subtitle: const Text('Switch to next server if current one fails'),
+      value:    v,
+      onChanged: setAutoFallback,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    ),
+  );
+}
+
 // ── Duration slider ────────────────────────────────────────────────────────
 class _DurationSlider extends StatelessWidget {
   const _DurationSlider();
 
-  static const _steps = [5, 10, 15, 20, 30, 60];
+  // 0 = infinite (runs until user stops, max 10 min)
+  static const _steps = [5, 10, 15, 20, 30, 60, 0];
 
   static int _secsToStep(int secs) {
     int closest = 0;
     for (int i = 0; i < _steps.length; i++) {
-      if ((_steps[i] - secs).abs() < (_steps[closest] - secs).abs()) {
+      if (secs == 0 && _steps[i] == 0) return i;
+      if (secs != 0 && (_steps[i] - secs).abs() < (_steps[closest] - secs).abs()
+          && _steps[i] != 0) {
         closest = i;
       }
     }
-    return closest;
+    return secs == 0 ? _steps.length - 1 : closest;
   }
 
-  static String _secsLabel(int secs) =>
-      secs == 60 ? '1 min' : '$secs s';
+  static String _secsLabel(int secs) {
+    if (secs == 0)  return '∞';
+    if (secs == 60) return '1 min';
+    return '$secs s';
+  }
 
   static String _accuracyHint(int secs) {
+    if (secs == 0)  return 'Runs until you press Stop (max 10 min)';
     if (secs <= 5)  return 'Fast — less accurate';
     if (secs <= 15) return 'Good speed / accuracy balance';
     if (secs <= 30) return 'Accurate — recommended';
@@ -400,7 +429,7 @@ class _DurationSlider extends StatelessWidget {
                 children: _steps.map((s) {
                   final selected = s == secs;
                   return Text(
-                    s == 60 ? '1m' : '${s}s',
+                    s == 0 ? '∞' : s == 60 ? '1m' : '${s}s',
                     style: t.textTheme.labelSmall?.copyWith(
                       color: selected
                           ? t.colorScheme.primary
@@ -478,7 +507,7 @@ class _ClearHistoryTile extends StatelessWidget {
     final t = Theme.of(context);
     return ListTile(
       leading: Icon(Icons.delete_sweep_outlined, color: t.colorScheme.error),
-      title:   Text('Clear all logs',
+      title: Text('Clear all logs',
           style: TextStyle(color: t.colorScheme.error)),
       subtitle: Text(
           'Permanently delete all saved results',
