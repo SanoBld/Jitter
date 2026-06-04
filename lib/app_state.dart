@@ -1,29 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// One ValueNotifier per app-wide setting
 final themeModeNotifier        = ValueNotifier<ThemeMode>(ThemeMode.system);
 final useDynamicColorNotifier  = ValueNotifier<bool>(true);
 final seedColorNotifier        = ValueNotifier<Color>(kPresetColors[0]);
 final selectedServerNotifier   = ValueNotifier<int>(0);
-final speedUnitMbpsNotifier    = ValueNotifier<bool>(true);   // true = Mb/s
+final speedUnitMbpsNotifier    = ValueNotifier<bool>(true);
 final autoSaveHistoryNotifier  = ValueNotifier<bool>(true);
-final testDurationSecsNotifier = ValueNotifier<int>(30);      // 0 = infinite
-final autoFallbackNotifier     = ValueNotifier<bool>(true);   // try next server on failure
-final useGpsLocationNotifier   = ValueNotifier<bool>(true);   // use device GPS if available
+final testDurationSecsNotifier = ValueNotifier<int>(30);
+final autoFallbackNotifier     = ValueNotifier<bool>(true);
+final useGpsLocationNotifier   = ValueNotifier<bool>(true);
+final localeNotifier           = ValueNotifier<Locale>(const Locale('en'));
 
-// IP-based location (city + ISP from public IP)
+// IP location
 final ipLocationNotifier       = ValueNotifier<String>('');
 final ispNameNotifier          = ValueNotifier<String>('');
 final locationFetchingNotifier = ValueNotifier<bool>(false);
 
-// GPS-based location (device sensor)
-final gpsLocationNotifier      = ValueNotifier<String>('');
-final gpsLatNotifier           = ValueNotifier<double?>(null);
-final gpsLngNotifier           = ValueNotifier<double?>(null);
-final gpsFetchingNotifier      = ValueNotifier<bool>(false);
+// GPS location
+final gpsLocationNotifier = ValueNotifier<String>('');
+final gpsLatNotifier      = ValueNotifier<double?>(null);
+final gpsLngNotifier      = ValueNotifier<double?>(null);
+final gpsFetchingNotifier = ValueNotifier<bool>(false);
 
-// Which location string is "active" for display and history saving
 String get activeLocation {
   if (useGpsLocationNotifier.value && gpsLocationNotifier.value.isNotEmpty) {
     return gpsLocationNotifier.value;
@@ -31,21 +30,21 @@ String get activeLocation {
   return ipLocationNotifier.value;
 }
 
-// Legacy alias so existing code still compiles
+// Legacy alias
 ValueNotifier<String> get userLocationNotifier => ipLocationNotifier;
 
-// Preset accent colors
 const List<Color> kPresetColors = [
-  Color(0xFF6750A4), // Violet (default)
-  Color(0xFF1565C0), // Blue
-  Color(0xFF00796B), // Teal
-  Color(0xFF2E7D32), // Green
-  Color(0xFFE65100), // Orange
-  Color(0xFFC62828), // Red
-  Color(0xFFAD1457), // Pink
+  Color(0xFF6750A4),
+  Color(0xFF1565C0),
+  Color(0xFF00796B),
+  Color(0xFF2E7D32),
+  Color(0xFFE65100),
+  Color(0xFFC62828),
+  Color(0xFFAD1457),
 ];
 
-// Load all saved settings from disk on startup
+const _kSupportedLocales = ['en', 'fr', 'es'];
+
 Future<void> loadSettings() async {
   final p  = await SharedPreferences.getInstance();
   final ti = (p.getInt('pref_theme') ?? 0).clamp(0, 2);
@@ -62,6 +61,8 @@ Future<void> loadSettings() async {
   ipLocationNotifier.value       = p.getString('pref_ip_location')     ?? '';
   ispNameNotifier.value          = p.getString('pref_isp_name')        ?? '';
   gpsLocationNotifier.value      = p.getString('pref_gps_location')    ?? '';
+  final lang = p.getString('pref_locale') ?? 'en';
+  localeNotifier.value = Locale(_kSupportedLocales.contains(lang) ? lang : 'en');
 }
 
 Future<SharedPreferences> get _p => SharedPreferences.getInstance();
@@ -128,4 +129,9 @@ Future<void> setGpsLocation(String city, double? lat, double? lng) async {
   gpsLatNotifier.value      = lat;
   gpsLngNotifier.value      = lng;
   (await _p).setString('pref_gps_location', city);
+}
+
+Future<void> setLocale(String lang) async {
+  localeNotifier.value = Locale(lang);
+  (await _p).setString('pref_locale', lang);
 }

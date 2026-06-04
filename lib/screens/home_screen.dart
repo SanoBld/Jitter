@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../app_state.dart';
+import '../l10n.dart';
 import '../services/internet_speed_service.dart';
 import '../services/location_service.dart';
 import 'settings_screen.dart';
@@ -13,14 +14,14 @@ import 'settings_screen.dart';
 enum _Grade { excellent, veryGood, good, fair, slow, poor }
 
 extension _GradeX on _Grade {
-  String get label {
+  String labelFor(BuildContext ctx) {
     switch (this) {
-      case _Grade.excellent: return 'EXCELLENT';
-      case _Grade.veryGood:  return 'VERY GOOD';
-      case _Grade.good:      return 'GOOD';
-      case _Grade.fair:      return 'FAIR';
-      case _Grade.slow:      return 'SLOW';
-      case _Grade.poor:      return 'VERY SLOW';
+      case _Grade.excellent: return ctx.tr('grade_excellent');
+      case _Grade.veryGood:  return ctx.tr('grade_veryGood');
+      case _Grade.good:      return ctx.tr('grade_good');
+      case _Grade.fair:      return ctx.tr('grade_fair');
+      case _Grade.slow:      return ctx.tr('grade_slow');
+      case _Grade.poor:      return ctx.tr('grade_poor');
     }
   }
   Color get color {
@@ -514,21 +515,21 @@ class _HomeScreenState extends State<HomeScreen>
         onDestinationSelected:  (i) => setState(() => _tab = i),
         backgroundColor:        t.colorScheme.surface,
         indicatorColor:         t.colorScheme.primaryContainer.withValues(alpha: 0.5),
-        destinations: const [
+        destinations: [
           NavigationDestination(
-            icon:         Icon(Icons.speed_outlined),
-            selectedIcon: Icon(Icons.speed),
-            label:        'Test',
+            icon:         const Icon(Icons.speed_outlined),
+            selectedIcon: const Icon(Icons.speed),
+            label:        context.tr('tabTest'),
           ),
           NavigationDestination(
-            icon:         Icon(Icons.bar_chart_outlined),
-            selectedIcon: Icon(Icons.bar_chart),
-            label:        'Logs',
+            icon:         const Icon(Icons.bar_chart_outlined),
+            selectedIcon: const Icon(Icons.bar_chart),
+            label:        context.tr('tabLogs'),
           ),
           NavigationDestination(
-            icon:         Icon(Icons.tune_outlined),
-            selectedIcon: Icon(Icons.tune),
-            label:        'Settings',
+            icon:         const Icon(Icons.tune_outlined),
+            selectedIcon: const Icon(Icons.tune),
+            label:        context.tr('tabSettings'),
           ),
         ],
       ),
@@ -655,7 +656,7 @@ class _HomeScreenState extends State<HomeScreen>
                 const SizedBox(width: 4),
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(
-                    fetching ? 'Detecting…' : loc.isEmpty ? 'Unknown' : loc,
+                    fetching ? context.tr('detecting') : loc.isEmpty ? context.tr('unknown') : loc,
                     style: t.textTheme.labelSmall?.copyWith(
                       fontSize:   10,
                       fontWeight: FontWeight.w600,
@@ -717,9 +718,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
             const SizedBox(width: 6),
-            Text(phase == 'READY' ? 'READY'
-                : phase == 'DONE' ? 'DONE'
-                : phase,
+            Text(phaseLabel(phase, context),
                 style: t.textTheme.labelSmall?.copyWith(
                     fontWeight:    FontWeight.bold,
                     letterSpacing: 0.6,
@@ -842,7 +841,7 @@ class _HomeScreenState extends State<HomeScreen>
                                           Icon(g.icon,
                                               size: 11, color: g.color),
                                           const SizedBox(width: 5),
-                                          Text(g.label,
+                                          Text(g.labelFor(context),
                                               style: TextStyle(
                                                 fontSize:      10,
                                                 fontWeight:    FontWeight.w800,
@@ -871,7 +870,7 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _phaseBar(ThemeData t) {
     return ValueListenableBuilder<String>(
       valueListenable: _phaseNf,
-      builder: (_, phase, __) => ValueListenableBuilder<double>(
+      builder: (ctx, phase, __) => ValueListenableBuilder<double>(
         valueListenable: _dlProgNf,
         builder: (_, dlP, __) => ValueListenableBuilder<double>(
           valueListenable: _ulProgNf,
@@ -936,12 +935,12 @@ class _HomeScreenState extends State<HomeScreen>
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         // PING label
-                        Text('PING',
+                        Text(ctx.tr('ping'),
                             style: _segLabel(phase == 'PING', pingDone, t,
                                 t.colorScheme.tertiary)),
                         // DOWNLOAD label + timer
                         Column(children: [
-                          Text('↓ DOWNLOAD',
+                          Text(ctx.tr('dlLabel'),
                               style: _segLabel(dlActive, dlDone, t,
                                   t.colorScheme.primary)),
                           if ((dlActive || ulActive) && testing) ...[
@@ -966,7 +965,7 @@ class _HomeScreenState extends State<HomeScreen>
                         // UPLOAD label + timer
                         Column(crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                          Text('↑ UPLOAD',
+                          Text(ctx.tr('ulLabel'),
                               style: _segLabel(ulActive, ulDone, t,
                                   t.colorScheme.secondary)),
                           if (ulActive && testing) ...[
@@ -1048,7 +1047,7 @@ class _HomeScreenState extends State<HomeScreen>
         children: [
           _statChip(
             icon:      Icons.arrow_downward_rounded,
-            label:     'DOWN',
+            label:     context.tr('down'),
             iconColor: t.colorScheme.primary,
             valueBuilder: () => ValueListenableBuilder<double>(
               valueListenable: _dlNf,
@@ -1069,7 +1068,7 @@ class _HomeScreenState extends State<HomeScreen>
           _divider(t),
           _statChip(
             icon:      Icons.arrow_upward_rounded,
-            label:     'UP',
+            label:     context.tr('up'),
             iconColor: t.colorScheme.secondary,
             valueBuilder: () => ValueListenableBuilder<double>(
               valueListenable: _ulNf,
@@ -1090,7 +1089,7 @@ class _HomeScreenState extends State<HomeScreen>
           _divider(t),
           _statChip(
             icon:      Icons.network_ping_rounded,
-            label:     'PING',
+            label:     context.tr('ping'),
             iconColor: t.colorScheme.tertiary,
             valueBuilder: () => ValueListenableBuilder<int>(
               valueListenable: _pingNf,
@@ -1104,7 +1103,7 @@ class _HomeScreenState extends State<HomeScreen>
           _divider(t),
           _statChip(
             icon:      Icons.waves_rounded,
-            label:     'JITTER',
+            label:     context.tr('jitter'),
             iconColor: t.colorScheme.error,
             valueBuilder: () => ValueListenableBuilder<int>(
               valueListenable: _jitterNf,
@@ -1156,7 +1155,7 @@ class _HomeScreenState extends State<HomeScreen>
       builder: (_, cur, __) => ValueListenableBuilder<bool>(
         valueListenable: _testingNf,
         builder: (_, testing, __) => Row(children: [
-          Text('Duration:',
+          Text(context.tr('duration'),
               style: t.textTheme.labelSmall?.copyWith(
                 color:      t.colorScheme.onSurface.withValues(alpha: 0.4),
                 fontWeight: FontWeight.w500,
@@ -1347,14 +1346,14 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             // Header + fallback toggle
             Row(children: [
-              Text('Select server',
+              Text(context.tr('selectServer'),
                   style: t.textTheme.titleSmall
                       ?.copyWith(fontWeight: FontWeight.bold)),
               const Spacer(),
               ValueListenableBuilder<bool>(
                 valueListenable: autoFallbackNotifier,
                 builder: (_, v, __) => Row(children: [
-                  Text('Auto-fallback',
+                  Text(context.tr('autoFallback'),
                       style: t.textTheme.labelSmall?.copyWith(
                           color: t.colorScheme.onSurface.withValues(alpha: 0.5))),
                   const SizedBox(width: 4),
@@ -1447,7 +1446,7 @@ class _HomeScreenState extends State<HomeScreen>
                         color: t.colorScheme.error.withValues(alpha: 0.5)),
                   ),
                   const SizedBox(width: 12),
-                  Text('STOP',
+                  Text(context.tr('stop'),
                       style: TextStyle(
                         fontWeight:    FontWeight.bold,
                         letterSpacing: 2.0,
@@ -1461,8 +1460,8 @@ class _HomeScreenState extends State<HomeScreen>
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(100)),
                 ),
-                child: const Text('START TEST',
-                    style: TextStyle(
+                child: Text(context.tr('startTest'),
+                    style: const TextStyle(
                         fontWeight: FontWeight.bold, letterSpacing: 2.0)),
               ),
       ),
@@ -1482,7 +1481,7 @@ class _HomeScreenState extends State<HomeScreen>
       Icon(Icons.public_rounded, size: 14, color: t.colorScheme.tertiary),
       const SizedBox(width: 8),
       Expanded(
-        child: Text('Browser mode — only Cloudflare servers available.',
+        child: Text(context.tr('webBanner'),
             style: t.textTheme.labelSmall?.copyWith(
                 color: t.colorScheme.onTertiaryContainer, height: 1.4)),
       ),
@@ -1521,7 +1520,7 @@ class _HomeScreenState extends State<HomeScreen>
     // Group by user location
     final groups = <String, List<({_Entry e, int i})>>{};
     for (int i = 0; i < _history.length; i++) {
-      final loc = _history[i].userLoc.isEmpty ? '📍 Unknown' : _history[i].userLoc;
+      final loc = _history[i].userLoc.isEmpty ? context.tr('unknownLoc') : _history[i].userLoc;
       groups.putIfAbsent(loc, () => []).add((e: _history[i], i: i));
     }
 
@@ -1530,13 +1529,13 @@ class _HomeScreenState extends State<HomeScreen>
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('METRICS LOGS',
+            Text(context.tr('metricsLogs'),
                 style: t.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold, letterSpacing: 1.5)),
             if (_history.isNotEmpty)
               Text(
                 '${_history.length} test${_history.length > 1 ? 's' : ''}'
-                '  ·  ${groups.length} location${groups.length > 1 ? 's' : ''}',
+                '  ·  ${groups.length}',
                 style: t.textTheme.bodySmall?.copyWith(
                     color: t.colorScheme.onSurface.withValues(alpha: 0.4))),
           ]),
@@ -1545,7 +1544,7 @@ class _HomeScreenState extends State<HomeScreen>
             TextButton.icon(
               onPressed: _confirmClear,
               icon:  const Icon(Icons.delete_sweep_outlined, size: 15),
-              label: const Text('Clear all'),
+              label: Text(context.tr('clearAll')),
               style: TextButton.styleFrom(
                 foregroundColor: t.colorScheme.error,
                 visualDensity:   VisualDensity.compact,
@@ -1711,12 +1710,12 @@ class _HomeScreenState extends State<HomeScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title:   const Text('Clear history'),
-        content: const Text('Delete all test results? This cannot be undone.'),
+        title:   Text(context.tr('clearHistory')),
+        content: Text(context.tr('clearHistoryBody')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child:     const Text('Cancel'),
+            child:     Text(context.tr('cancel')),
           ),
           FilledButton(
             onPressed: () async {
@@ -1725,14 +1724,13 @@ class _HomeScreenState extends State<HomeScreen>
             },
             style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(ctx).colorScheme.error),
-            child: const Text('Delete all'),
+            child: Text(context.tr('deleteAll')),
           ),
         ],
       ),
     );
   }
 
-  // ── Empty state (no history) ───────────────────────────────────────────────
   Widget _emptyState(ThemeData t) {
     return Center(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1740,13 +1738,13 @@ class _HomeScreenState extends State<HomeScreen>
             size:  52,
             color: t.colorScheme.onSurface.withValues(alpha: 0.13)),
         const SizedBox(height: 14),
-        Text('No tests yet',
+        Text(context.tr('noTests'),
             style: t.textTheme.titleSmall?.copyWith(
               color:      t.colorScheme.onSurface.withValues(alpha: 0.35),
               fontWeight: FontWeight.w600,
             )),
         const SizedBox(height: 4),
-        Text('Run a speed test to see your results here.',
+        Text(context.tr('noTestsHint'),
             style: t.textTheme.bodySmall?.copyWith(
               color: t.colorScheme.onSurface.withValues(alpha: 0.22),
             )),
