@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../app_state.dart';
 import '../l10n.dart';
@@ -54,6 +56,8 @@ class SettingsScreen extends StatelessWidget {
         _section(context.tr('sHistory'), [
           const _AutoSaveTile(),
           const Divider(height: 1),
+          const _ExportCsvTile(),
+          const Divider(height: 1),
           const _ClearHistoryTile(),
         ], t),
         const SizedBox(height: 36),
@@ -61,7 +65,7 @@ class SettingsScreen extends StatelessWidget {
         Center(
           child: Text(context.tr('footer'),
               style: t.textTheme.bodySmall?.copyWith(
-                  color: t.colorScheme.onSurface.withOpacity(0.26))),
+                  color: t.colorScheme.onSurface.withValues(alpha: 0.26))),
         ),
       ],
     );
@@ -80,10 +84,10 @@ class SettingsScreen extends StatelessWidget {
         ),
         Container(
           decoration: BoxDecoration(
-            color:        t.colorScheme.onSurface.withOpacity(0.04),
+            color:        t.colorScheme.onSurface.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-                color: t.colorScheme.onSurface.withOpacity(0.06)),
+                color: t.colorScheme.onSurface.withValues(alpha: 0.06)),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
@@ -138,7 +142,7 @@ class _GpsTile extends StatelessWidget {
                       width: 36, height: 36,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: t.colorScheme.tertiaryContainer.withOpacity(0.5),
+                        color: t.colorScheme.tertiaryContainer.withValues(alpha: 0.5),
                       ),
                       child: Icon(Icons.gps_fixed_rounded,
                           size: 16, color: t.colorScheme.tertiary),
@@ -146,11 +150,9 @@ class _GpsTile extends StatelessWidget {
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   ),
-                  // Show GPS result when enabled
                   if (useGps)
                     Padding(
-                      padding:
-                          const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                       child: Row(children: [
                         const SizedBox(width: 46),
                         Expanded(
@@ -163,7 +165,7 @@ class _GpsTile extends StatelessWidget {
                             style: t.textTheme.bodySmall?.copyWith(
                               color: city.isNotEmpty && !fetching
                                   ? t.colorScheme.tertiary
-                                  : t.colorScheme.onSurface.withOpacity(0.4),
+                                  : t.colorScheme.onSurface.withValues(alpha: 0.4),
                               fontWeight: city.isNotEmpty && !fetching
                                   ? FontWeight.w600
                                   : FontWeight.normal,
@@ -230,7 +232,7 @@ class _IpLocationTile extends StatelessWidget {
               width: 36, height: 36,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: t.colorScheme.secondaryContainer.withOpacity(0.5),
+                color: t.colorScheme.secondaryContainer.withValues(alpha: 0.5),
               ),
               child: fetching
                   ? Padding(
@@ -253,7 +255,7 @@ class _IpLocationTile extends StatelessWidget {
                   style: t.textTheme.bodySmall?.copyWith(
                     color: loc.isNotEmpty && !fetching
                         ? t.colorScheme.secondary
-                        : t.colorScheme.onSurface.withOpacity(0.38),
+                        : t.colorScheme.onSurface.withValues(alpha: 0.38),
                     fontWeight: loc.isNotEmpty && !fetching
                         ? FontWeight.w600
                         : FontWeight.normal,
@@ -263,7 +265,7 @@ class _IpLocationTile extends StatelessWidget {
                   Text(isp,
                       style: t.textTheme.bodySmall?.copyWith(
                           fontSize: 11,
-                          color: t.colorScheme.onSurface.withOpacity(0.45))),
+                          color: t.colorScheme.onSurface.withValues(alpha: 0.45))),
               ],
             ),
             trailing: IconButton(
@@ -379,7 +381,7 @@ class _ColorPickerTile extends StatelessWidget {
                           width: 2.5,
                         ),
                         boxShadow: sel
-                            ? [BoxShadow(color: c.withOpacity(0.5), blurRadius: 6)]
+                            ? [BoxShadow(color: c.withValues(alpha: 0.5), blurRadius: 6)]
                             : null,
                       ),
                       child: sel
@@ -420,14 +422,14 @@ class _ServerList extends StatelessWidget {
                       ?.copyWith(fontWeight: FontWeight.w500)),
               subtitle: Text('${s.location} — ${s.provider}',
                   style: t.textTheme.bodySmall?.copyWith(
-                      color: t.colorScheme.onSurface.withOpacity(0.45))),
+                      color: t.colorScheme.onSurface.withValues(alpha: 0.45))),
               dense:          true,
               contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 2),
             ),
             if (i < servers.length - 1)
               Divider(height: 1, indent: 16,
-                  color: t.colorScheme.onSurface.withOpacity(0.06)),
+                  color: t.colorScheme.onSurface.withValues(alpha: 0.06)),
           ]);
         }),
       ),
@@ -456,7 +458,6 @@ class _AutoFallbackTile extends StatelessWidget {
 class _DurationSlider extends StatelessWidget {
   const _DurationSlider();
 
-  // 0 = infinite (runs until STOP)
   static const _steps = [5, 10, 15, 30, 60, 0];
 
   static int _idx(int secs) {
@@ -501,7 +502,7 @@ class _DurationSlider extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color:        t.colorScheme.primaryContainer.withOpacity(0.5),
+                  color:        t.colorScheme.primaryContainer.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(_label(secs),
@@ -513,7 +514,7 @@ class _DurationSlider extends StatelessWidget {
             const SizedBox(height: 4),
             Text(_hint(secs, context),
                 style: t.textTheme.bodySmall?.copyWith(
-                    color: t.colorScheme.onSurface.withOpacity(0.45))),
+                    color: t.colorScheme.onSurface.withValues(alpha: 0.45))),
             const SizedBox(height: 10),
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
@@ -542,7 +543,7 @@ class _DurationSlider extends StatelessWidget {
                         fontSize:   10,
                         color: sel
                             ? t.colorScheme.primary
-                            : t.colorScheme.onSurface.withOpacity(0.3),
+                            : t.colorScheme.onSurface.withValues(alpha: 0.3),
                         fontWeight:
                             sel ? FontWeight.bold : FontWeight.normal,
                       ));
@@ -556,9 +557,17 @@ class _DurationSlider extends StatelessWidget {
   }
 }
 
-// ── Unit picker ────────────────────────────────────────────────────────────
+// ── Unit picker — 4 options in a 2×2 grid ─────────────────────────────────
 class _UnitPicker extends StatelessWidget {
   const _UnitPicker();
+
+  static const _descriptions = [
+    'megabits/s  (standard)',
+    'megabytes/s  (÷ 8)',
+    'gigabits/s  (÷ 1 000)',
+    'gigabytes/s  (÷ 8 000)',
+  ];
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -566,26 +575,62 @@ class _UnitPicker extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(context.tr('speedUnit'),
-            style: t.textTheme.bodyMedium
-                ?.copyWith(fontWeight: FontWeight.w500)),
-        const SizedBox(height: 2),
+            style: t.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
+        const SizedBox(height: 4),
         Text(context.tr('speedUnitSub'),
             style: t.textTheme.bodySmall?.copyWith(
-                color: t.colorScheme.onSurface.withOpacity(0.45))),
-        const SizedBox(height: 12),
-        ValueListenableBuilder<bool>(
-          valueListenable: speedUnitMbpsNotifier,
-          builder: (_, isMbps, __) => SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: true,  label: Text('Mb/s  (bits)')),
-              ButtonSegment(value: false, label: Text('MB/s  (bytes)')),
-            ],
-            selected:           {isMbps},
-            onSelectionChanged: (s) => setSpeedUnit(s.first),
-            style: const ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
+                color: t.colorScheme.onSurface.withValues(alpha: 0.45))),
+        const SizedBox(height: 14),
+        ValueListenableBuilder<int>(
+          valueListenable: speedUnitIndexNotifier,
+          builder: (_, cur, __) => GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap:     true,
+            physics:        const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 8,
+            mainAxisSpacing:  8,
+            childAspectRatio: 2.8,
+            children: List.generate(kSpeedUnitLabels.length, (i) {
+              final sel = cur == i;
+              return GestureDetector(
+                onTap: () => setSpeedUnitIndex(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: sel
+                        ? t.colorScheme.primary.withValues(alpha: 0.12)
+                        : t.colorScheme.onSurface.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: sel
+                          ? t.colorScheme.primary.withValues(alpha: 0.4)
+                          : t.colorScheme.onSurface.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(kSpeedUnitLabels[i],
+                          style: t.textTheme.labelMedium?.copyWith(
+                            fontWeight: sel ? FontWeight.w800 : FontWeight.w600,
+                            color: sel
+                                ? t.colorScheme.primary
+                                : t.colorScheme.onSurface.withValues(alpha: 0.75),
+                          )),
+                      Text(_descriptions[i],
+                          style: t.textTheme.labelSmall?.copyWith(
+                            fontSize: 9,
+                            color: sel
+                                ? t.colorScheme.primary.withValues(alpha: 0.65)
+                                : t.colorScheme.onSurface.withValues(alpha: 0.38),
+                          )),
+                    ],
+                  ),
+                ),
+              );
+            }),
           ),
         ),
       ]),
@@ -610,6 +655,80 @@ class _AutoSaveTile extends StatelessWidget {
   );
 }
 
+// ── Export CSV tile ────────────────────────────────────────────────────────
+class _ExportCsvTile extends StatelessWidget {
+  const _ExportCsvTile();
+
+  Future<void> _export(BuildContext context) async {
+    final p   = await SharedPreferences.getInstance();
+    final raw = p.getStringList('speed_history') ?? [];
+    if (raw.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('exportEmpty'))),
+        );
+      }
+      return;
+    }
+
+    final buf = StringBuffer();
+    buf.writeln('timestamp,flag,server,provider,server_location,'
+        'user_location,download_mbps,upload_mbps,ping_ms,jitter_ms,unit');
+    for (final s in raw) {
+      try {
+        final j = json.decode(s) as Map<String, dynamic>;
+        final row = [
+          j['ts'],
+          j['flag'],
+          j['server'],
+          j['provider'] ?? '',
+          '"${(j['location'] ?? '').toString().replaceAll('"', '""')}"',
+          '"${(j['userLocation'] ?? '').toString().replaceAll('"', '""')}"',
+          j['dl'],
+          j['ul'],
+          j['ping'],
+          j['jitter'] ?? 0,
+          j['unit'] ?? 'Mb/s',
+        ].join(',');
+        buf.writeln(row);
+      } catch (_) {}
+    }
+
+    await Clipboard.setData(ClipboardData(text: buf.toString()));
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.tr('exportCopied')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return ListTile(
+      leading: Container(
+        width: 36, height: 36,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: t.colorScheme.secondaryContainer.withValues(alpha: 0.5),
+        ),
+        child: Icon(Icons.file_download_outlined,
+            size: 16, color: t.colorScheme.secondary),
+      ),
+      title: Text(context.tr('exportCsv')),
+      subtitle: Text(context.tr('exportCsvSub'),
+          style: t.textTheme.bodySmall?.copyWith(
+              color: t.colorScheme.onSurface.withValues(alpha: 0.45))),
+      onTap: () => _export(context),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    );
+  }
+}
+
 // ── Clear history tile ─────────────────────────────────────────────────────
 class _ClearHistoryTile extends StatelessWidget {
   const _ClearHistoryTile();
@@ -622,7 +741,7 @@ class _ClearHistoryTile extends StatelessWidget {
           style: TextStyle(color: t.colorScheme.error)),
       subtitle: Text(context.tr('clearLogsSub'),
           style: t.textTheme.bodySmall?.copyWith(
-              color: t.colorScheme.onSurface.withOpacity(0.45))),
+              color: t.colorScheme.onSurface.withValues(alpha: 0.45))),
       onTap: () async {
         final ok = await showDialog<bool>(
           context: context,
@@ -636,8 +755,7 @@ class _ClearHistoryTile extends StatelessWidget {
               TextButton(
                   onPressed: () => Navigator.pop(ctx, true),
                   child: Text(context.tr('delete'),
-                      style: TextStyle(
-                          color: t.colorScheme.error))),
+                      style: TextStyle(color: t.colorScheme.error))),
             ],
           ),
         );
@@ -651,6 +769,7 @@ class _ClearHistoryTile extends StatelessWidget {
     );
   }
 }
+
 // ── Language picker ────────────────────────────────────────────────────────
 class _LanguageTile extends StatelessWidget {
   const _LanguageTile();
@@ -678,13 +797,13 @@ class _LanguageTile extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
                     color: locale.languageCode == code
-                        ? t.colorScheme.primary.withOpacity(0.12)
-                        : t.colorScheme.onSurface.withOpacity(0.04),
+                        ? t.colorScheme.primary.withValues(alpha: 0.12)
+                        : t.colorScheme.onSurface.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: locale.languageCode == code
-                          ? t.colorScheme.primary.withOpacity(0.4)
-                          : t.colorScheme.onSurface.withOpacity(0.07),
+                          ? t.colorScheme.primary.withValues(alpha: 0.4)
+                          : t.colorScheme.onSurface.withValues(alpha: 0.07),
                     ),
                   ),
                   child: Column(children: [
@@ -697,7 +816,7 @@ class _LanguageTile extends StatelessWidget {
                               : FontWeight.w400,
                           color: locale.languageCode == code
                               ? t.colorScheme.primary
-                              : t.colorScheme.onSurface.withOpacity(0.55),
+                              : t.colorScheme.onSurface.withValues(alpha: 0.55),
                         )),
                   ]),
                 ),

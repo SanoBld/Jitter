@@ -133,9 +133,9 @@ const _t = <String, Map<String, String>>{
   // Unit picker
   'speedUnit':    {'en': 'Speed unit',  'fr': 'Unité de vitesse', 'es': 'Unidad de velocidad'},
   'speedUnitSub': {
-    'en': 'Mb/s = megabits/s  ·  MB/s = megabytes/s  (= Mb/s ÷ 8)',
-    'fr': 'Mb/s = mégabits/s  ·  Mo/s = mégaoctets/s  (= Mb/s ÷ 8)',
-    'es': 'Mb/s = megabits/s  ·  MB/s = megabytes/s  (= Mb/s ÷ 8)',
+    'en': 'Mb/s = megabits  ·  MB/s = megabytes  ·  Gb/s = gigabits  ·  GB/s = gigabytes',
+    'fr': 'Mb/s = mégabits  ·  Mo/s = mégaoctets  ·  Gb/s = gigabits  ·  Go/s = gigaoctets',
+    'es': 'Mb/s = megabits  ·  MB/s = megabytes  ·  Gb/s = gigabits  ·  GB/s = gigabytes',
   },
 
   // Auto-save
@@ -153,6 +153,24 @@ const _t = <String, Map<String, String>>{
   },
   'delete':          {'en': 'Delete',  'fr': 'Supprimer', 'es': 'Eliminar'},
 
+  // Export
+  'exportCsv':     {'en': 'Export CSV',          'fr': 'Exporter CSV',         'es': 'Exportar CSV'},
+  'exportCsvSub':  {'en': 'Copy all results to clipboard as CSV',
+                    'fr': 'Copier les résultats dans le presse-papiers',
+                    'es': 'Copiar resultados al portapapeles como CSV'},
+  'exportCopied':  {'en': 'Copied to clipboard!', 'fr': 'Copié !',             'es': '¡Copiado!'},
+  'exportEmpty':   {'en': 'No data to export',    'fr': 'Aucune donnée',       'es': 'Sin datos'},
+
+  // Log detail sheet
+  'testDetail':    {'en': 'TEST DETAIL',  'fr': 'DÉTAIL DU TEST', 'es': 'DETALLE'},
+  'trend':         {'en': 'TREND',        'fr': 'TENDANCE',       'es': 'TENDENCIA'},
+  'vsAverage':     {'en': 'VS. AVERAGE',  'fr': 'VS MOYENNE',     'es': 'VS PROMEDIO'},
+  'thisTest':      {'en': 'This test',    'fr': 'Ce test',        'es': 'Esta prueba'},
+  'average':       {'en': 'Average',      'fr': 'Moyenne',        'es': 'Promedio'},
+  'allNTests':     {'en': 'all {n} tests','fr': '{n} tests',      'es': '{n} pruebas'},
+  'server':        {'en': 'Server',       'fr': 'Serveur',        'es': 'Servidor'},
+  'location':      {'en': 'Location',     'fr': 'Localisation',   'es': 'Ubicación'},
+
   // Footer
   'footer': {'en': 'Jitter v1.0.0  ·  Made with Flutter', 'fr': 'Jitter v1.0.0  ·  Fait avec Flutter', 'es': 'Jitter v1.0.0  ·  Hecho con Flutter'},
 };
@@ -163,6 +181,9 @@ extension AppL10n on BuildContext {
     final lang = Localizations.localeOf(this).languageCode;
     return _t[key]?[lang] ?? _t[key]?['en'] ?? key;
   }
+
+  /// Interpolate {n} in a translated string.
+  String trN(String key, int n) => tr(key).replaceAll('{n}', '$n');
 }
 
 // Translate a phase code to the current locale

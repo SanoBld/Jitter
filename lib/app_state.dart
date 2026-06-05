@@ -5,7 +5,7 @@ final themeModeNotifier        = ValueNotifier<ThemeMode>(ThemeMode.system);
 final useDynamicColorNotifier  = ValueNotifier<bool>(true);
 final seedColorNotifier        = ValueNotifier<Color>(kPresetColors[0]);
 final selectedServerNotifier   = ValueNotifier<int>(0);
-final speedUnitMbpsNotifier    = ValueNotifier<bool>(true);
+final speedUnitIndexNotifier   = ValueNotifier<int>(0); // 0=Mb/s 1=MB/s 2=Gb/s 3=GB/s
 final autoSaveHistoryNotifier  = ValueNotifier<bool>(true);
 final testDurationSecsNotifier = ValueNotifier<int>(30);
 final autoFallbackNotifier     = ValueNotifier<bool>(true);
@@ -30,8 +30,35 @@ String get activeLocation {
   return ipLocationNotifier.value;
 }
 
-// Legacy alias
+// Legacy alias kept for backward compat
 ValueNotifier<String> get userLocationNotifier => ipLocationNotifier;
+
+// ── Speed unit helpers ─────────────────────────────────────────────────────
+const List<String> kSpeedUnitLabels = ['Mb/s', 'MB/s', 'Gb/s', 'GB/s'];
+
+/// Convert a raw Mb/s value to the selected unit.
+double convertSpeed(double mbps, int unitIdx) {
+  switch (unitIdx) {
+    case 1: return mbps / 8;
+    case 2: return mbps / 1000;
+    case 3: return mbps / 8000;
+    default: return mbps;
+  }
+}
+
+/// Format a raw Mb/s value as a display string for the selected unit.
+String formatSpeedValue(double mbps, int unitIdx) {
+  final v = convertSpeed(mbps, unitIdx);
+  switch (unitIdx) {
+    case 2: // Gb/s
+    case 3: // GB/s
+      if (v >= 1.0) return v.toStringAsFixed(2);
+      if (v >= 0.1) return v.toStringAsFixed(3);
+      return v.toStringAsFixed(4);
+    default: // Mb/s or MB/s
+      return v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+  }
+}
 
 const List<Color> kPresetColors = [
   Color(0xFF6750A4),
@@ -53,7 +80,17 @@ Future<void> loadSettings() async {
   final ci = (p.getInt('pref_color_index') ?? 0).clamp(0, kPresetColors.length - 1);
   seedColorNotifier.value        = kPresetColors[ci];
   selectedServerNotifier.value   = p.getInt('pref_server')             ?? 0;
-  speedUnitMbpsNotifier.value    = p.getBool('pref_unit_mbps')         ?? true;
+
+  // Unit: migrate from legacy bool pref to int index
+  if (p.containsKey('pref_unit_index')) {
+    speedUnitIndexNotifier.value =
+        (p.getInt('pref_unit_index') ?? 0).clamp(0, kSpeedUnitLabels.length - 1);
+  } else {
+    // Migrate old bool preference
+    final wasMbps = p.getBool('pref_unit_mbps') ?? true;
+    speedUnitIndexNotifier.value = wasMbps ? 0 : 1;
+  }
+
   autoSaveHistoryNotifier.value  = p.getBool('pref_auto_save')         ?? true;
   testDurationSecsNotifier.value = p.getInt('pref_test_duration_secs') ?? 30;
   autoFallbackNotifier.value     = p.getBool('pref_auto_fallback')     ?? true;
@@ -87,10 +124,13 @@ Future<void> setServer(int index) async {
   (await _p).setInt('pref_server', index);
 }
 
-Future<void> setSpeedUnit(bool mbps) async {
-  speedUnitMbpsNotifier.value = mbps;
-  (await _p).setBool('pref_unit_mbps', mbps);
+Future<void> setSpeedUnitIndex(int idx) async {
+  speedUnitIndexNotifier.value = idx.clamp(0, kSpeedUnitLabels.length - 1);
+  (await _p).setInt('pref_unit_index', speedUnitIndexNotifier.value);
 }
+
+/// Legacy: kept for backward compat — maps bool to index 0/1.
+Future<void> setSpeedUnit(bool mbps) => setSpeedUnitIndex(mbps ? 0 : 1);
 
 Future<void> setAutoSave(bool v) async {
   autoSaveHistoryNotifier.value = v;
