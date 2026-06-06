@@ -5,12 +5,19 @@ final themeModeNotifier        = ValueNotifier<ThemeMode>(ThemeMode.system);
 final useDynamicColorNotifier  = ValueNotifier<bool>(true);
 final seedColorNotifier        = ValueNotifier<Color>(kPresetColors[0]);
 final selectedServerNotifier   = ValueNotifier<int>(0);
-final speedUnitIndexNotifier   = ValueNotifier<int>(0); // 0=Mb/s 1=MB/s 2=Gb/s 3=GB/s
+final speedUnitIndexNotifier   = ValueNotifier<int>(0);
 final autoSaveHistoryNotifier  = ValueNotifier<bool>(true);
-final testDurationSecsNotifier = ValueNotifier<int>(30);
 final autoFallbackNotifier     = ValueNotifier<bool>(true);
 final useGpsLocationNotifier   = ValueNotifier<bool>(true);
 final localeNotifier           = ValueNotifier<Locale>(const Locale('en'));
+
+// Per-phase test durations (seconds; 0 = infinite)
+final dlDurationSecsNotifier  = ValueNotifier<int>(30);
+final ulDurationSecsNotifier  = ValueNotifier<int>(30);
+final linkDurationsNotifier   = ValueNotifier<bool>(true);
+
+// Legacy single-duration kept for settings screen compat
+final testDurationSecsNotifier = ValueNotifier<int>(30);
 
 // IP location
 final ipLocationNotifier       = ValueNotifier<String>('');
@@ -30,13 +37,11 @@ String get activeLocation {
   return ipLocationNotifier.value;
 }
 
-// Legacy alias kept for backward compat
 ValueNotifier<String> get userLocationNotifier => ipLocationNotifier;
 
 // ── Speed unit helpers ─────────────────────────────────────────────────────
 const List<String> kSpeedUnitLabels = ['Mb/s', 'MB/s', 'Gb/s', 'GB/s'];
 
-/// Convert a raw Mb/s value to the selected unit.
 double convertSpeed(double mbps, int unitIdx) {
   switch (unitIdx) {
     case 1: return mbps / 8;
@@ -46,16 +51,15 @@ double convertSpeed(double mbps, int unitIdx) {
   }
 }
 
-/// Format a raw Mb/s value as a display string for the selected unit.
 String formatSpeedValue(double mbps, int unitIdx) {
   final v = convertSpeed(mbps, unitIdx);
   switch (unitIdx) {
-    case 2: // Gb/s
-    case 3: // GB/s
+    case 2:
+    case 3:
       if (v >= 1.0) return v.toStringAsFixed(2);
       if (v >= 0.1) return v.toStringAsFixed(3);
       return v.toStringAsFixed(4);
-    default: // Mb/s or MB/s
+    default:
       return v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
   }
 }
@@ -75,29 +79,33 @@ const _kSupportedLocales = ['en', 'fr', 'es'];
 Future<void> loadSettings() async {
   final p  = await SharedPreferences.getInstance();
   final ti = (p.getInt('pref_theme') ?? 0).clamp(0, 2);
-  themeModeNotifier.value        = ThemeMode.values[ti];
-  useDynamicColorNotifier.value  = p.getBool('pref_dynamic_color')     ?? true;
+  themeModeNotifier.value       = ThemeMode.values[ti];
+  useDynamicColorNotifier.value = p.getBool('pref_dynamic_color') ?? true;
   final ci = (p.getInt('pref_color_index') ?? 0).clamp(0, kPresetColors.length - 1);
-  seedColorNotifier.value        = kPresetColors[ci];
-  selectedServerNotifier.value   = p.getInt('pref_server')             ?? 0;
+  seedColorNotifier.value       = kPresetColors[ci];
+  selectedServerNotifier.value  = p.getInt('pref_server') ?? 0;
 
-  // Unit: migrate from legacy bool pref to int index
   if (p.containsKey('pref_unit_index')) {
     speedUnitIndexNotifier.value =
         (p.getInt('pref_unit_index') ?? 0).clamp(0, kSpeedUnitLabels.length - 1);
   } else {
-    // Migrate old bool preference
-    final wasMbps = p.getBool('pref_unit_mbps') ?? true;
-    speedUnitIndexNotifier.value = wasMbps ? 0 : 1;
+    speedUnitIndexNotifier.value = (p.getBool('pref_unit_mbps') ?? true) ? 0 : 1;
   }
 
-  autoSaveHistoryNotifier.value  = p.getBool('pref_auto_save')         ?? true;
-  testDurationSecsNotifier.value = p.getInt('pref_test_duration_secs') ?? 30;
-  autoFallbackNotifier.value     = p.getBool('pref_auto_fallback')     ?? true;
-  useGpsLocationNotifier.value   = p.getBool('pref_use_gps')           ?? true;
-  ipLocationNotifier.value       = p.getString('pref_ip_location')     ?? '';
-  ispNameNotifier.value          = p.getString('pref_isp_name')        ?? '';
-  gpsLocationNotifier.value      = p.getString('pref_gps_location')    ?? '';
+  autoSaveHistoryNotifier.value = p.getBool('pref_auto_save')     ?? true;
+  autoFallbackNotifier.value    = p.getBool('pref_auto_fallback') ?? true;
+  useGpsLocationNotifier.value  = p.getBool('pref_use_gps')       ?? true;
+  ipLocationNotifier.value      = p.getString('pref_ip_location') ?? '';
+  ispNameNotifier.value         = p.getString('pref_isp_name')    ?? '';
+  gpsLocationNotifier.value     = p.getString('pref_gps_location') ?? '';
+
+  // Durations
+  final legacy = p.getInt('pref_test_duration_secs') ?? 30;
+  dlDurationSecsNotifier.value  = p.getInt('pref_dl_duration') ?? legacy;
+  ulDurationSecsNotifier.value  = p.getInt('pref_ul_duration') ?? legacy;
+  linkDurationsNotifier.value   = p.getBool('pref_link_durations') ?? true;
+  testDurationSecsNotifier.value = dlDurationSecsNotifier.value;
+
   final lang = p.getString('pref_locale') ?? 'en';
   localeNotifier.value = Locale(_kSupportedLocales.contains(lang) ? lang : 'en');
 }
@@ -129,17 +137,50 @@ Future<void> setSpeedUnitIndex(int idx) async {
   (await _p).setInt('pref_unit_index', speedUnitIndexNotifier.value);
 }
 
-/// Legacy: kept for backward compat — maps bool to index 0/1.
 Future<void> setSpeedUnit(bool mbps) => setSpeedUnitIndex(mbps ? 0 : 1);
 
-Future<void> setAutoSave(bool v) async {
-  autoSaveHistoryNotifier.value = v;
-  (await _p).setBool('pref_auto_save', v);
+Future<void> setDlDuration(int secs) async {
+  dlDurationSecsNotifier.value   = secs;
+  testDurationSecsNotifier.value = secs;
+  (await _p).setInt('pref_dl_duration', secs);
+  if (linkDurationsNotifier.value) {
+    ulDurationSecsNotifier.value = secs;
+    (await _p).setInt('pref_ul_duration', secs);
+  }
+}
+
+Future<void> setUlDuration(int secs) async {
+  ulDurationSecsNotifier.value = secs;
+  (await _p).setInt('pref_ul_duration', secs);
+  if (linkDurationsNotifier.value) {
+    dlDurationSecsNotifier.value   = secs;
+    testDurationSecsNotifier.value = secs;
+    (await _p).setInt('pref_dl_duration', secs);
+  }
+}
+
+Future<void> setLinkDurations(bool v) async {
+  linkDurationsNotifier.value = v;
+  (await _p).setBool('pref_link_durations', v);
+  if (v) {
+    // Sync UL to DL when re-linking
+    ulDurationSecsNotifier.value = dlDurationSecsNotifier.value;
+    (await _p).setInt('pref_ul_duration', dlDurationSecsNotifier.value);
+  }
 }
 
 Future<void> setTestDuration(int secs) async {
   testDurationSecsNotifier.value = secs;
+  dlDurationSecsNotifier.value   = secs;
+  ulDurationSecsNotifier.value   = secs;
   (await _p).setInt('pref_test_duration_secs', secs);
+  (await _p).setInt('pref_dl_duration', secs);
+  (await _p).setInt('pref_ul_duration', secs);
+}
+
+Future<void> setAutoSave(bool v) async {
+  autoSaveHistoryNotifier.value = v;
+  (await _p).setBool('pref_auto_save', v);
 }
 
 Future<void> setAutoFallback(bool v) async {
