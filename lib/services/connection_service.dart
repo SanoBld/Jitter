@@ -1,39 +1,47 @@
 import 'dart:io';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
-class ConnectionInfo {
-  final String type, ssid, localIp;
-  const ConnectionInfo({required this.type, required this.ssid, required this.localIp});
-}
-
+/// Provides basic connection info using only dart:io — no extra packages needed.
 class ConnectionService {
-  static Future<ConnectionInfo> getInfo() async {
+  /// Returns the device's local IPv4 address and a best-guess connection type.
+  /// SSID requires platform-specific packages so it is left empty here.
+  static Future<({String ssid, String localIp, String type})> getInfo() async {
+    if (kIsWeb) return (ssid: '', localIp: '', type: 'Browser');
+
     try {
-      final results = await Connectivity().checkConnectivity();
-      final result  = results.isNotEmpty ? results.first : ConnectivityResult.none;
-      final type = result == ConnectivityResult.wifi
-          ? 'Wi-Fi'
-          : result == ConnectivityResult.mobile
-              ? 'Mobile'
-              : result == ConnectivityResult.ethernet
-                  ? 'Ethernet'
-                  : '';
+      // Use dart:io NetworkInterface to find the first non-loopback IPv4 address.
+      final interfaces = await NetworkInterface.list(
+        type:            InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+
       String localIp = '';
-      try {
-        final interfaces = await NetworkInterface.list();
-        for (final iface in interfaces) {
-          for (final addr in iface.addresses) {
-            if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
-              localIp = addr.address;
-              break;
-            }
+      String ifName  = '';
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (!addr.isLoopback && addr.address.isNotEmpty) {
+            localIp = addr.address;
+            ifName  = iface.name.toLowerCase();
+            break;
           }
-          if (localIp.isNotEmpty) break;
         }
-      } catch (_) {}
-      return ConnectionInfo(type: type, ssid: '', localIp: localIp);
+        if (localIp.isNotEmpty) break;
+      }
+
+      // Heuristic: interface name often hints at the connection type.
+      String type = '';
+      if (ifName.contains('wlan') || ifName.contains('wifi') || ifName.startsWith('wl')) {
+        type = 'Wi-Fi';
+      } else if (ifName.contains('rmnet') || ifName.contains('ppp') ||
+                 ifName.contains('ccmni') || ifName.startsWith('mobile')) {
+        type = 'Mobile';
+      } else if (ifName.contains('eth') || ifName.contains('en')) {
+        type = 'Ethernet';
+      }
+
+      return (ssid: '', localIp: localIp, type: type);
     } catch (_) {
-      return const ConnectionInfo(type: '', ssid: '', localIp: '');
+      return (ssid: '', localIp: '', type: '');
     }
   }
 }

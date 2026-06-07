@@ -18,10 +18,8 @@ dependencies:
   geolocator: ^10.1.0
   flutter_map: ^6.1.0
   latlong2: ^0.9.0
-  file_picker: ^8.0.0
-  path_provider: ^2.1.0
-  share_plus: ^10.0.0
-  connectivity_plus: ^6.0.0
+  connectivity_plus: ^5.0.2
+  network_info_plus: ^4.1.0
 
 dev_dependencies:
   flutter_test:
@@ -36,6 +34,10 @@ flutter_launcher_icons:
   min_sdk_android: 21
   adaptive_icon_background: "#6750A4"
   adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  windows:
+    generate: true
+    image_path: "assets/icon/icon.png"
+    icon_size: 48
 
 flutter:
   uses-material-design: true

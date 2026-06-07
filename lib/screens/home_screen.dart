@@ -5,11 +5,8 @@ import 'dart:math';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../app_state.dart';
 import '../l10n.dart';
@@ -1656,7 +1653,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // Build CSV string (UTF-8 BOM for Excel compatibility)
+  // Build CSV string (UTF-8 BOM so Excel opens it correctly without encoding issues)
   String _buildCsv() {
     final buf = StringBuffer('\uFEFF'); // UTF-8 BOM
     buf.writeln('timestamp,flag,server,provider,server_location,'
@@ -1674,144 +1671,168 @@ class _HomeScreenState extends State<HomeScreen>
     return buf.toString();
   }
 
-  // Export: write temp file + share sheet (works on Android, iOS, Windows)
+  // Export: copy CSV to clipboard (UTF-8 BOM = paste directly into Excel)
   Future<void> _exportToFile() async {
     if (_history.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(context.tr('exportEmpty'))));
       return;
     }
-    try {
-      final csv  = _buildCsv();
-      final dir  = await getTemporaryDirectory();
-      final file = File('${dir.path}/jitter_export.csv');
-      await file.writeAsString(csv, encoding: utf8);
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'text/csv')],
-        subject: 'Jitter — ${_history.length} test result(s)',
-      );
-    } catch (_) {
-      // Fallback: copy to clipboard
-      await Clipboard.setData(ClipboardData(text: _buildCsv()));
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(context.tr('exportCopied')),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
+    await Clipboard.setData(ClipboardData(text: _buildCsv()));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(context.tr('exportCopied')),
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
-  // Legacy clipboard export (still available via settings tile)
+  // Legacy alias
   Future<void> _exportCsv() => _exportToFile();
 
-  // Import: pick a CSV file exported by Jitter
+  // Import: paste CSV text directly in a dialog (pre-filled from clipboard)
   Future<void> _importData() async {
+    final ctrl = TextEditingController();
+
+    // Pre-fill clipboard if it looks like a Jitter CSV
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type:              FileType.custom,
-        allowedExtensions: ['csv'],
-        withData:          true,
-      );
-      if (result == null || result.files.isEmpty) return;
-
-      final bytes   = result.files.first.bytes;
-      final content = bytes != null
-          ? String.fromCharCodes(bytes)
-          : await File(result.files.first.path!).readAsString();
-
-      // Strip UTF-8 BOM if present
-      final csv = content.startsWith('\uFEFF')
-          ? content.substring(1)
-          : content;
-
-      final lines  = csv.split('\n').map((l) => l.trim()).toList();
-      if (lines.isEmpty) return;
-
-      // Skip header line
-      final header = lines.first.toLowerCase();
-      final startIdx = header.contains('timestamp') ? 1 : 0;
-
-      final imported = <_Entry>[];
-      for (final line in lines.skip(startIdx)) {
-        if (line.isEmpty) continue;
-        try {
-          // Simple CSV split (handles quoted fields)
-          final cols = _splitCsvLine(line);
-          if (cols.length < 10) continue;
-          imported.add(_Entry(
-            timestamp: cols[0],
-            flag:      cols[1],
-            server:    cols[2],
-            provider:  cols.length > 3 ? cols[3] : '',
-            serverLoc: cols.length > 4 ? cols[4] : '',
-            userLoc:   cols.length > 5 ? cols[5] : '',
-            dl:        double.tryParse(cols[6]) ?? 0,
-            ul:        double.tryParse(cols[7]) ?? 0,
-            ping:      int.tryParse(cols[8]) ?? 0,
-            jitter:    int.tryParse(cols[9]) ?? 0,
-            unit:      cols.length > 10 ? cols[10] : 'Mb/s',
-            lat:       cols.length > 11 ? double.tryParse(cols[11]) : null,
-            lng:       cols.length > 12 ? double.tryParse(cols[12]) : null,
-          ));
-        } catch (_) { continue; }
+      final clip = await Clipboard.getData('text/plain');
+      final text = clip?.text ?? '';
+      if (text.contains('download_mbps') || text.contains('timestamp')) {
+        ctrl.text = text;
       }
+    } catch (_) {}
 
-      if (imported.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No valid entries found in file.')));
-        }
-        return;
-      }
+    if (!mounted) return;
 
-      // Confirm merge
-      if (!mounted) return;
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Import data'),
-          content: Text('Found ${imported.length} test(s).\n'
-              'Add them to your existing ${_history.length} result(s)?'),
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final t = Theme.of(ctx);
+        return AlertDialog(
+          title: const Text('Import CSV'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(
+              'Paste a previously exported Jitter CSV.\n'
+              'Existing entries with the same timestamp are skipped.',
+              style: t.textTheme.bodySmall?.copyWith(
+                  color: t.colorScheme.onSurface.withValues(alpha: 0.55)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller:  ctrl,
+              maxLines:    6,
+              style:       const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+              decoration:  InputDecoration(
+                border:      OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                hintText:    'timestamp,flag,server,…',
+                hintStyle:   TextStyle(
+                    fontSize: 11,
+                    color: t.colorScheme.onSurface.withValues(alpha: 0.3)),
+                contentPadding: const EdgeInsets.all(10),
+              ),
+            ),
+          ]),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false),
-                child: Text(context.tr('cancel'))),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Import')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child:     Text(context.tr('cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child:     const Text('Import'),
+            ),
           ],
-        ),
-      );
-      if (ok != true) return;
+        );
+      },
+    );
 
-      // Merge: add imported entries, deduplicate by timestamp+server
-      final seen = <String>{
-        for (final e in _history) '${e.timestamp}_${e.server}',
-      };
-      int added = 0;
-      for (final e in imported) {
-        final key = '${e.timestamp}_${e.server}';
-        if (!seen.contains(key)) {
-          _history.add(e);
-          seen.add(key);
-          added++;
-        }
-      }
-      // Sort newest first
-      _history.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      setState(() {});
-      await _saveHistory();
+    if (ok != true || ctrl.text.trim().isEmpty) return;
+    await _parseCsvAndImport(ctrl.text);
+  }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('$added new result(s) imported.'),
-          behavior: SnackBarBehavior.floating,
+  Future<void> _parseCsvAndImport(String csv) async {
+    // Strip UTF-8 BOM if present
+    final raw = csv.startsWith('\uFEFF') ? csv.substring(1) : csv;
+    final lines = raw.split('\n').map((l) => l.trim()).toList();
+    if (lines.isEmpty) return;
+
+    // Skip header row if present
+    final startIdx = lines.first.toLowerCase().contains('timestamp') ? 1 : 0;
+
+    final imported = <_Entry>[];
+    for (final line in lines.skip(startIdx)) {
+      if (line.isEmpty) continue;
+      try {
+        final cols = _splitCsvLine(line);
+        if (cols.length < 10) continue;
+        imported.add(_Entry(
+          timestamp: cols[0],
+          flag:      cols[1],
+          server:    cols[2],
+          provider:  cols.length > 3  ? cols[3]  : '',
+          serverLoc: cols.length > 4  ? cols[4]  : '',
+          userLoc:   cols.length > 5  ? cols[5]  : '',
+          dl:        double.tryParse(cols[6]) ?? 0,
+          ul:        double.tryParse(cols[7]) ?? 0,
+          ping:      int.tryParse(cols[8])    ?? 0,
+          jitter:    int.tryParse(cols[9])    ?? 0,
+          unit:      cols.length > 10 ? cols[10] : 'Mb/s',
+          lat:       cols.length > 11 ? double.tryParse(cols[11]) : null,
+          lng:       cols.length > 12 ? double.tryParse(cols[12]) : null,
         ));
-      }
-    } catch (e) {
+      } catch (_) { continue; }
+    }
+
+    if (imported.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Import failed: $e')));
+            const SnackBar(content: Text('No valid entries found.')));
       }
+      return;
+    }
+
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import data'),
+        content: Text(
+            'Found ${imported.length} test(s).\n'
+            'Add them to your ${_history.length} existing result(s)?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child:     Text(context.tr('cancel'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child:     const Text('Import')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final seen = <String>{
+      for (final e in _history) '${e.timestamp}_${e.server}',
+    };
+    int added = 0;
+    for (final e in imported) {
+      final key = '${e.timestamp}_${e.server}';
+      if (!seen.contains(key)) {
+        _history.add(e);
+        seen.add(key);
+        added++;
+      }
+    }
+    _history.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    setState(() {});
+    await _saveHistory();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('$added new result(s) imported.'),
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
