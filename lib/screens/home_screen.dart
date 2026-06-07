@@ -108,12 +108,7 @@ class _Entry {
   );
 }
 
-const _kSteps = [5, 10, 15, 30, 60, 0];
-String _stepLabel(int s) {
-  if (s == 0)  return '∞';
-  if (s == 60) return '1 min';
-  return '${s}s';
-}
+
 String _fmt(int secs) {
   final m = secs ~/ 60, s = secs % 60;
   return '${m.toString().padLeft(2,'0')}:${s.toString().padLeft(2,'0')}';
@@ -953,7 +948,7 @@ class _HomeScreenState extends State<HomeScreen>
     color: t.colorScheme.onSurface.withValues(alpha: 0.07),
   );
 
-  // ── Dual duration row ──────────────────────────────────────────────────────
+  // ── Dual duration row — fully free custom input ───────────────────────────
   Widget _dualDurationRow(ThemeData t) {
     return ValueListenableBuilder<bool>(
       valueListenable: linkDurationsNotifier,
@@ -995,8 +990,7 @@ class _HomeScreenState extends State<HomeScreen>
                     Text(
                       linked ? context.tr('linked') : context.tr('custom'),
                       style: t.textTheme.labelSmall?.copyWith(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 10, fontWeight: FontWeight.w700,
                         color: linked ? t.colorScheme.primary : t.colorScheme.secondary,
                       ),
                     ),
@@ -1005,23 +999,23 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ]),
             const SizedBox(height: 8),
-            // DL row
+            // DL
             _durationPhaseRow(
-              label: context.tr('dlDuration'),
+              label:    context.tr('dlDuration'),
               notifier: dlDurationSecsNotifier,
-              onTap: testing ? null : setDlDuration,
-              color: t.colorScheme.primary,
-              t: t,
+              setter:   testing ? null : setDlDuration,
+              color:    t.colorScheme.primary,
+              t:        t,
             ),
-            // UL row — only show separately when unlinked
+            // UL — only shown when unlinked
             if (!linked) ...[
               const SizedBox(height: 6),
               _durationPhaseRow(
-                label: context.tr('ulDuration'),
+                label:    context.tr('ulDuration'),
                 notifier: ulDurationSecsNotifier,
-                onTap: testing ? null : setUlDuration,
-                color: t.colorScheme.secondary,
-                t: t,
+                setter:   testing ? null : setUlDuration,
+                color:    t.colorScheme.secondary,
+                t:        t,
               ),
             ],
           ],
@@ -1030,64 +1024,219 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Free-input duration row:  [label]  [-5]  [tap-to-edit value]  [+5]  [∞]
   Widget _durationPhaseRow({
-    required String label,
-    required ValueNotifier<int> notifier,
-    required Future<void> Function(int)? onTap,
-    required Color color,
-    required ThemeData t,
+    required String                       label,
+    required ValueNotifier<int>           notifier,
+    required Future<void> Function(int)?  setter,
+    required Color                        color,
+    required ThemeData                    t,
   }) {
     return ValueListenableBuilder<int>(
       valueListenable: notifier,
-      builder: (_, cur, __) => Row(children: [
-        SizedBox(
-          width: 44,
-          child: Text(label,
-              style: t.textTheme.labelSmall?.copyWith(
-                fontSize: 10, fontWeight: FontWeight.w700, color: color,
-              )),
-        ),
-        Expanded(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: _kSteps.map((s) {
-                final sel = s == cur;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 5),
-                  child: GestureDetector(
-                    onTap: onTap == null ? null : () => onTap(s),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: sel
-                            ? color.withValues(alpha: 0.12)
-                            : t.colorScheme.onSurface.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: sel
-                              ? color.withValues(alpha: 0.4)
-                              : t.colorScheme.onSurface.withValues(alpha: 0.08),
-                        ),
-                      ),
-                      child: Text(_stepLabel(s),
-                          style: t.textTheme.labelSmall?.copyWith(
-                            fontSize: 10.5,
-                            fontWeight: sel ? FontWeight.w800 : FontWeight.w400,
-                            color: sel
-                                ? color
-                                : t.colorScheme.onSurface.withValues(alpha: onTap == null ? 0.2 : 0.5),
-                          )),
-                    ),
+      builder: (_, cur, __) {
+        final isInf     = cur == 0;
+        final canChange = setter != null;
+        // Shadow as non-nullable for safe calls below
+        final safeSet = setter;
+
+        return Row(children: [
+          // Phase label
+          SizedBox(
+            width: 46,
+            child: Text(label,
+                style: t.textTheme.labelSmall?.copyWith(
+                  fontSize: 10, fontWeight: FontWeight.w700, color: color,
+                )),
+          ),
+
+          // −5 button
+          _durBtn(
+            icon:    Icons.remove_rounded,
+            color:   color,
+            enabled: canChange && !isInf && cur > 1,
+            onTap:   () => safeSet!(max(1, cur - 5)),
+            t:       t,
+          ),
+          const SizedBox(width: 4),
+
+          // Value display — tap to type freely
+          GestureDetector(
+            onTap: canChange ? () => _pickDuration(notifier, safeSet!, color) : null,
+            child: AnimatedContainer(
+              duration:  const Duration(milliseconds: 180),
+              padding:   const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: color.withValues(alpha: 0.35)),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(
+                  isInf ? '∞' : '$cur',
+                  style: t.textTheme.titleSmall?.copyWith(
+                    fontWeight:   FontWeight.w800,
+                    color:        color,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
-                );
-              }).toList(),
+                ),
+                if (!isInf) ...[
+                  const SizedBox(width: 3),
+                  Text('s', style: t.textTheme.labelSmall?.copyWith(
+                    fontSize: 10, color: color.withValues(alpha: 0.6),
+                  )),
+                ],
+                const SizedBox(width: 5),
+                Icon(Icons.edit_rounded, size: 10,
+                    color: color.withValues(alpha: canChange ? 0.45 : 0.2)),
+              ]),
             ),
           ),
-        ),
-      ]),
+          const SizedBox(width: 4),
+
+          // +5 button
+          _durBtn(
+            icon:    Icons.add_rounded,
+            color:   color,
+            enabled: canChange && !isInf,
+            onTap:   () => safeSet!(min(3600, cur + 5)),
+            t:       t,
+          ),
+          const SizedBox(width: 6),
+
+          // ∞ toggle
+          GestureDetector(
+            onTap: canChange ? () => safeSet!(isInf ? 30 : 0) : null,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding:  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isInf
+                    ? color.withValues(alpha: 0.12)
+                    : t.colorScheme.onSurface.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isInf
+                      ? color.withValues(alpha: 0.35)
+                      : t.colorScheme.onSurface.withValues(alpha: 0.08),
+                ),
+              ),
+              child: Icon(Icons.all_inclusive_rounded,
+                  size: 14,
+                  color: isInf
+                      ? color
+                      : t.colorScheme.onSurface.withValues(alpha: canChange ? 0.35 : 0.15)),
+            ),
+          ),
+        ]);
+      },
     );
+  }
+
+  Widget _durBtn({
+    required IconData              icon,
+    required Color                 color,
+    required bool                  enabled,
+    required VoidCallback          onTap,
+    required ThemeData             t,
+  }) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 32, height: 32,
+        decoration: BoxDecoration(
+          color:        t.colorScheme.onSurface.withValues(alpha: enabled ? 0.06 : 0.03),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+              color: t.colorScheme.onSurface.withValues(alpha: enabled ? 0.10 : 0.04)),
+        ),
+        child: Icon(icon, size: 14,
+            color: enabled
+                ? color.withValues(alpha: 0.8)
+                : t.colorScheme.onSurface.withValues(alpha: 0.18)),
+      ),
+    );
+  }
+
+  /// Dialog for fully free text input of duration in seconds
+  Future<void> _pickDuration(
+    ValueNotifier<int>          notifier,
+    Future<void> Function(int)  setter,
+    Color                       color,
+  ) async {
+    final t    = Theme.of(context);
+    final cur  = notifier.value;
+    final ctrl = TextEditingController(text: cur == 0 ? '' : '$cur');
+    ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
+
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Duration (seconds)',
+            style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Enter any value from 1 to 3600 s,\nor leave empty for ∞ (infinite).',
+              style: t.textTheme.bodySmall?.copyWith(
+                  color: t.colorScheme.onSurface.withValues(alpha: 0.5))),
+          const SizedBox(height: 16),
+          TextField(
+            controller:     ctrl,
+            autofocus:      true,
+            keyboardType:   TextInputType.number,
+            textAlign:      TextAlign.center,
+            style:          t.textTheme.displaySmall?.copyWith(
+                fontWeight: FontWeight.w800, color: color),
+            decoration: InputDecoration(
+              suffix: Text('s', style: TextStyle(
+                  color: color.withValues(alpha: 0.5), fontSize: 16)),
+              hintText: '∞',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: color, width: 2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Quick preset chips
+          Wrap(spacing: 6, children: [
+            for (final s in [5, 10, 15, 20, 30, 45, 60, 90, 120])
+              ActionChip(
+                label:      Text('${s}s'),
+                onPressed:  () => Navigator.pop(ctx, s),
+                visualDensity: VisualDensity.compact,
+                backgroundColor: color.withValues(alpha: 0.1),
+                side: BorderSide(color: color.withValues(alpha: 0.3)),
+                labelStyle: TextStyle(
+                    color: color, fontWeight: FontWeight.w600, fontSize: 11),
+              ),
+          ]),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child:     const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: color),
+            onPressed: () {
+              final txt = ctrl.text.trim();
+              if (txt.isEmpty) {
+                Navigator.pop(ctx, 0); // infinite
+              } else {
+                final v = int.tryParse(txt);
+                if (v != null && v >= 1) {
+                  Navigator.pop(ctx, v.clamp(1, 3600));
+                }
+              }
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null) { await setter(result); }
   }
 
   // ── Quick options: server + unit ───────────────────────────────────────────
