@@ -1,14 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../app_state.dart';
 import '../l10n.dart';
+import '../services/connection_service.dart';
 import '../services/internet_speed_service.dart';
 import '../services/location_service.dart';
 import 'settings_screen.dart';
@@ -142,6 +147,10 @@ class _HomeScreenState extends State<HomeScreen>
   final _pingHist   = ValueNotifier<List<int>>([]);
   final _elapsedNf  = ValueNotifier<int>(0);
   final _errorNf    = ValueNotifier<String?>(null);
+  // Connection info (updated at test start)
+  final _connTypNf  = ValueNotifier<String>('');
+  final _wifiSsidNf = ValueNotifier<String>('');
+  final _localIpNf  = ValueNotifier<String>('');
 
   bool   _stopRequested = false;
   Timer? _bgPingTimer;
@@ -169,6 +178,7 @@ class _HomeScreenState extends State<HomeScreen>
       _speedNf,_dlNf,_ulNf,_pingNf,_jitterNf,_testingNf,
       _phaseNf,_progressNf,_dlProgNf,_ulProgNf,_pointsNf,
       _pingHist,_elapsedNf,_errorNf,
+      _connTypNf,_wifiSsidNf,_localIpNf,
     ]) { n.dispose(); }
     super.dispose();
   }
@@ -266,6 +276,12 @@ class _HomeScreenState extends State<HomeScreen>
     _dlProgNf.value   = 0;
     _ulProgNf.value   = 0;
     _phaseNf.value    = 'LOCATING';
+    // Fetch connection info (non-blocking)
+    ConnectionService.getInfo().then((info) {
+      _connTypNf.value  = info.type;
+      _wifiSsidNf.value = info.ssid;
+      _localIpNf.value  = info.localIp;
+    });
     try {
       _fetchIpLocation();
       _progressNf.value = 0.04;
@@ -511,7 +527,9 @@ class _HomeScreenState extends State<HomeScreen>
       _chart(t),
       const SizedBox(height: 10),
       _statsRow(t),
-      const SizedBox(height: 10),
+      const SizedBox(height: 6),
+      _connInfoRow(t),
+      const SizedBox(height: 6),
       _dualDurationRow(t),
       const SizedBox(height: 8),
       _quickOptions(t),
@@ -523,11 +541,6 @@ class _HomeScreenState extends State<HomeScreen>
 
   // ── Top bar ────────────────────────────────────────────────────────────────
   Widget _topBar(ThemeData t) => Row(children: [
-    Text('JITTER', style: t.textTheme.titleSmall?.copyWith(
-      fontWeight: FontWeight.w900, letterSpacing: 3.5,
-      color: t.colorScheme.primary,
-    )),
-    const SizedBox(width: 8),
     _gpsChip(t),
     const Spacer(),
     _locationChip(t),
@@ -879,7 +892,12 @@ class _HomeScreenState extends State<HomeScreen>
           final color = phase == 'UPLOAD' ? t.colorScheme.secondary : t.colorScheme.primary;
           return ClipRRect(
             borderRadius: BorderRadius.circular(10),
-            child: CustomPaint(painter: _ChartPainter(points: pts, color: color, t: t)),
+            child: LayoutBuilder(
+              builder: (_, box) => CustomPaint(
+                size:    Size(box.maxWidth, box.maxHeight),
+                painter: _ChartPainter(points: pts, color: color, t: t),
+              ),
+            ),
           );
         },
       ),
@@ -947,6 +965,101 @@ class _HomeScreenState extends State<HomeScreen>
     height: 28, width: 1,
     color: t.colorScheme.onSurface.withValues(alpha: 0.07),
   );
+
+  // ── Connection info row: type, SSID, local IP, external IP ────────────────
+  Widget _connInfoRow(ThemeData t) {
+    return ValueListenableBuilder<String>(
+      valueListenable: _connTypNf,
+      builder: (_, type, __) => ValueListenableBuilder<String>(
+        valueListenable: _wifiSsidNf,
+        builder: (_, ssid, __) => ValueListenableBuilder<String>(
+          valueListenable: _localIpNf,
+          builder: (_, localIp, __) => ValueListenableBuilder<String>(
+            valueListenable: ipLocationNotifier,
+            builder: (_, extLoc, __) => ValueListenableBuilder<String>(
+              valueListenable: ispNameNotifier,
+              builder: (_, isp, __) {
+                // Only show when we have at least one piece of info
+                final hasAny = type.isNotEmpty || ssid.isNotEmpty ||
+                    localIp.isNotEmpty || isp.isNotEmpty;
+                if (!hasAny) return const SizedBox.shrink();
+
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: [
+                    if (type.isNotEmpty)
+                      _connChip(
+                        icon:  type == 'Wi-Fi'
+                            ? Icons.wifi_rounded
+                            : type == 'Mobile'
+                                ? Icons.signal_cellular_alt_rounded
+                                : Icons.lan_rounded,
+                        label: type,
+                        color: t.colorScheme.primary,
+                        t:     t,
+                      ),
+                    if (ssid.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      _connChip(
+                        icon:  Icons.router_rounded,
+                        label: ssid,
+                        color: t.colorScheme.tertiary,
+                        t:     t,
+                      ),
+                    ],
+                    if (localIp.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      _connChip(
+                        icon:  Icons.devices_rounded,
+                        label: localIp,
+                        color: t.colorScheme.secondary,
+                        t:     t,
+                      ),
+                    ],
+                    if (isp.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      _connChip(
+                        icon:  Icons.business_rounded,
+                        label: isp,
+                        color: t.colorScheme.onSurface.withValues(alpha: 0.5),
+                        t:     t,
+                      ),
+                    ],
+                  ]),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _connChip({
+    required IconData icon,
+    required String   label,
+    required Color    color,
+    required ThemeData t,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color:        color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border:       Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 10, color: color),
+        const SizedBox(width: 4),
+        Text(label,
+            style: TextStyle(
+              fontSize:   9.5,
+              color:      color,
+              fontWeight: FontWeight.w600,
+            )),
+      ]),
+    );
+  }
 
   // ── Dual duration row — fully free custom input ───────────────────────────
   Widget _dualDurationRow(ThemeData t) {
@@ -1501,13 +1614,24 @@ class _HomeScreenState extends State<HomeScreen>
           ]),
           const Spacer(),
           if (_history.isNotEmpty) ...[
+            // Export to file (share)
             IconButton(
               icon: const Icon(Icons.file_download_outlined, size: 18),
               tooltip: context.tr('exportCsv'),
-              onPressed: _exportCsv,
+              onPressed: _exportToFile,
               color: t.colorScheme.secondary,
               visualDensity: VisualDensity.compact,
             ),
+          ],
+          // Import always available
+          IconButton(
+            icon: const Icon(Icons.file_upload_outlined, size: 18),
+            tooltip: 'Import CSV',
+            onPressed: _importData,
+            color: t.colorScheme.tertiary,
+            visualDensity: VisualDensity.compact,
+          ),
+          if (_history.isNotEmpty)
             TextButton.icon(
               onPressed: _confirmClear,
               icon:  const Icon(Icons.delete_sweep_outlined, size: 15),
@@ -1517,7 +1641,6 @@ class _HomeScreenState extends State<HomeScreen>
                 visualDensity:   VisualDensity.compact,
               ),
             ),
-          ],
         ]),
         const SizedBox(height: 14),
         Expanded(
@@ -1533,13 +1656,9 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Future<void> _exportCsv() async {
-    if (_history.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.tr('exportEmpty'))));
-      return;
-    }
-    final buf = StringBuffer();
+  // Build CSV string (UTF-8 BOM for Excel compatibility)
+  String _buildCsv() {
+    final buf = StringBuffer('\uFEFF'); // UTF-8 BOM
     buf.writeln('timestamp,flag,server,provider,server_location,'
         'user_location,download_mbps,upload_mbps,ping_ms,jitter_ms,unit,lat,lng');
     for (final e in _history) {
@@ -1552,13 +1671,171 @@ class _HomeScreenState extends State<HomeScreen>
         e.lat ?? '', e.lng ?? '',
       ].join(','));
     }
-    await Clipboard.setData(ClipboardData(text: buf.toString()));
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(context.tr('exportCopied')),
-        behavior: SnackBarBehavior.floating,
-      ));
+    return buf.toString();
+  }
+
+  // Export: write temp file + share sheet (works on Android, iOS, Windows)
+  Future<void> _exportToFile() async {
+    if (_history.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('exportEmpty'))));
+      return;
     }
+    try {
+      final csv  = _buildCsv();
+      final dir  = await getTemporaryDirectory();
+      final file = File('${dir.path}/jitter_export.csv');
+      await file.writeAsString(csv, encoding: utf8);
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'text/csv')],
+        subject: 'Jitter — ${_history.length} test result(s)',
+      );
+    } catch (_) {
+      // Fallback: copy to clipboard
+      await Clipboard.setData(ClipboardData(text: _buildCsv()));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(context.tr('exportCopied')),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
+  // Legacy clipboard export (still available via settings tile)
+  Future<void> _exportCsv() => _exportToFile();
+
+  // Import: pick a CSV file exported by Jitter
+  Future<void> _importData() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type:              FileType.custom,
+        allowedExtensions: ['csv'],
+        withData:          true,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      final bytes   = result.files.first.bytes;
+      final content = bytes != null
+          ? String.fromCharCodes(bytes)
+          : await File(result.files.first.path!).readAsString();
+
+      // Strip UTF-8 BOM if present
+      final csv = content.startsWith('\uFEFF')
+          ? content.substring(1)
+          : content;
+
+      final lines  = csv.split('\n').map((l) => l.trim()).toList();
+      if (lines.isEmpty) return;
+
+      // Skip header line
+      final header = lines.first.toLowerCase();
+      final startIdx = header.contains('timestamp') ? 1 : 0;
+
+      final imported = <_Entry>[];
+      for (final line in lines.skip(startIdx)) {
+        if (line.isEmpty) continue;
+        try {
+          // Simple CSV split (handles quoted fields)
+          final cols = _splitCsvLine(line);
+          if (cols.length < 10) continue;
+          imported.add(_Entry(
+            timestamp: cols[0],
+            flag:      cols[1],
+            server:    cols[2],
+            provider:  cols.length > 3 ? cols[3] : '',
+            serverLoc: cols.length > 4 ? cols[4] : '',
+            userLoc:   cols.length > 5 ? cols[5] : '',
+            dl:        double.tryParse(cols[6]) ?? 0,
+            ul:        double.tryParse(cols[7]) ?? 0,
+            ping:      int.tryParse(cols[8]) ?? 0,
+            jitter:    int.tryParse(cols[9]) ?? 0,
+            unit:      cols.length > 10 ? cols[10] : 'Mb/s',
+            lat:       cols.length > 11 ? double.tryParse(cols[11]) : null,
+            lng:       cols.length > 12 ? double.tryParse(cols[12]) : null,
+          ));
+        } catch (_) { continue; }
+      }
+
+      if (imported.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No valid entries found in file.')));
+        }
+        return;
+      }
+
+      // Confirm merge
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Import data'),
+          content: Text('Found ${imported.length} test(s).\n'
+              'Add them to your existing ${_history.length} result(s)?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false),
+                child: Text(context.tr('cancel'))),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Import')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+
+      // Merge: add imported entries, deduplicate by timestamp+server
+      final seen = <String>{
+        for (final e in _history) '${e.timestamp}_${e.server}',
+      };
+      int added = 0;
+      for (final e in imported) {
+        final key = '${e.timestamp}_${e.server}';
+        if (!seen.contains(key)) {
+          _history.add(e);
+          seen.add(key);
+          added++;
+        }
+      }
+      // Sort newest first
+      _history.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      setState(() {});
+      await _saveHistory();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$added new result(s) imported.'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import failed: $e')));
+      }
+    }
+  }
+
+  /// Splits a single CSV line respecting double-quoted fields.
+  List<String> _splitCsvLine(String line) {
+    final result = <String>[];
+    final buf    = StringBuffer();
+    bool inQuote = false;
+    for (int i = 0; i < line.length; i++) {
+      final c = line[i];
+      if (c == '"') {
+        if (inQuote && i + 1 < line.length && line[i + 1] == '"') {
+          buf.write('"'); i++; // escaped quote
+        } else {
+          inQuote = !inQuote;
+        }
+      } else if (c == ',' && !inQuote) {
+        result.add(buf.toString().trim()); buf.clear();
+      } else {
+        buf.write(c);
+      }
+    }
+    result.add(buf.toString().trim());
+    return result;
   }
 
   Widget _locationGroup(String loc, List<({_Entry e, int i})> items, ThemeData t) =>
@@ -2008,7 +2285,9 @@ class _EntryDetailSheetState extends State<_EntryDetailSheet> {
                       ),
                       children: [
                         TileLayer(
-                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          urlTemplate: Theme.of(context).brightness == Brightness.dark
+                              ? 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+                              : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                           userAgentPackageName: 'com.jitter.app',
                         ),
                         MarkerLayer(markers: [
@@ -2299,7 +2578,9 @@ class _MapScreenState extends State<_MapScreen> {
         ),
         children: [
           TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            urlTemplate: Theme.of(context).brightness == Brightness.dark
+                ? 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+                : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'com.jitter.app',
             maxZoom: 19,
           ),
@@ -2515,15 +2796,16 @@ class _TrendChart extends StatefulWidget {
 }
 
 class _TrendChartState extends State<_TrendChart> {
-  int? _hoverIdx;
-  final _key = GlobalKey();
+  int?   _hoverIdx;
+  double _cachedWidth = 0; // set by LayoutBuilder, used for touch → index mapping
 
   int _posToIdx(Offset local) {
-    final box = _key.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || widget.entries.length < 2) return 0;
+    if (_cachedWidth <= 0 || widget.entries.length < 2) return 0;
     const padL = 44.0, padR = 12.0;
-    final frac = ((local.dx - padL) / (box.size.width - padL - padR)).clamp(0.0, 1.0);
-    return (frac * (widget.entries.length - 1)).round().clamp(0, widget.entries.length - 1);
+    final frac = ((local.dx - padL) / (_cachedWidth - padL - padR)).clamp(0.0, 1.0);
+    return (frac * (widget.entries.length - 1))
+        .round()
+        .clamp(0, widget.entries.length - 1);
   }
 
   void _touch(Offset pos) {
@@ -2542,16 +2824,24 @@ class _TrendChartState extends State<_TrendChart> {
     onPanStart:  (d) => _touch(d.localPosition),
     onPanUpdate: (d) => _touch(d.localPosition),
     onPanEnd:    (_) => _end(),
-    child: RepaintBoundary(
-      key: _key,
-      child: CustomPaint(
-        painter: _TrendChartPainter(
-          entries: widget.entries, selectedIdx: widget.selectedIdx,
-          hoverIdx: _hoverIdx,      metric: widget.metric,
-          color: widget.color,      t: widget.t,
-        ),
-        child: const SizedBox.expand(),
-      ),
+    // LayoutBuilder gives us the ACTUAL pixel dimensions from the parent Container
+    // (height: 190 + column width). This is reliable on all platforms,
+    // unlike SizedBox.expand() which breaks inside unbounded scroll views on mobile.
+    child: LayoutBuilder(
+      builder: (_, constraints) {
+        _cachedWidth = constraints.maxWidth;
+        return CustomPaint(
+          size: Size(constraints.maxWidth, constraints.maxHeight),
+          painter: _TrendChartPainter(
+            entries:     widget.entries,
+            selectedIdx: widget.selectedIdx,
+            hoverIdx:    _hoverIdx,
+            metric:      widget.metric,
+            color:       widget.color,
+            t:           widget.t,
+          ),
+        );
+      },
     ),
   );
 }
