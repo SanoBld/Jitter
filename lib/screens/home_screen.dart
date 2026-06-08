@@ -144,6 +144,9 @@ class _HomeScreenState extends State<HomeScreen>
   final _pingHist   = ValueNotifier<List<int>>([]);
   final _elapsedNf  = ValueNotifier<int>(0);
   final _errorNf    = ValueNotifier<String?>(null);
+  // Phase averages (set at the END of each phase, kept until next test)
+  final _dlAvgNf    = ValueNotifier<double>(0);
+  final _ulAvgNf    = ValueNotifier<double>(0);
   // Connection info (updated at test start)
   final _connTypNf  = ValueNotifier<String>('');
   final _wifiSsidNf = ValueNotifier<String>('');
@@ -175,6 +178,7 @@ class _HomeScreenState extends State<HomeScreen>
       _speedNf,_dlNf,_ulNf,_pingNf,_jitterNf,_testingNf,
       _phaseNf,_progressNf,_dlProgNf,_ulProgNf,_pointsNf,
       _pingHist,_elapsedNf,_errorNf,
+      _dlAvgNf,_ulAvgNf,
       _connTypNf,_wifiSsidNf,_localIpNf,
     ]) { n.dispose(); }
     super.dispose();
@@ -272,6 +276,8 @@ class _HomeScreenState extends State<HomeScreen>
     _progressNf.value = 0;
     _dlProgNf.value   = 0;
     _ulProgNf.value   = 0;
+    _dlAvgNf.value    = 0;
+    _ulAvgNf.value    = 0;
     _phaseNf.value    = 'LOCATING';
     // Fetch connection info (non-blocking)
     ConnectionService.getInfo().then((info) {
@@ -378,6 +384,11 @@ class _HomeScreenState extends State<HomeScreen>
     if (_stopRequested) return;
     _progressNf.value = 0.54;
     _dlProgNf.value   = 1.0;
+    // Compute and store DL average from accumulated points
+    final dlPts = _pointsNf.value;
+    if (dlPts.isNotEmpty) {
+      _dlAvgNf.value = dlPts.fold(0.0, (a, b) => a + b) / dlPts.length;
+    }
 
     // ── Upload phase ───────────────────────────────────────────────────────
     _phaseNf.value  = 'UPLOAD';
@@ -408,7 +419,12 @@ class _HomeScreenState extends State<HomeScreen>
 
     _progressNf.value = 1.0;
     _ulProgNf.value   = 1.0;
-    _speedNf.value    = _dlNf.value;
+    // Compute and store UL average
+    final ulPts = _pointsNf.value;
+    if (ulPts.isNotEmpty) {
+      _ulAvgNf.value = ulPts.fold(0.0, (a, b) => a + b) / ulPts.length;
+    }
+    _speedNf.value = _dlNf.value;
     _finish('DONE');
 
     if (autoSaveHistoryNotifier.value) {
@@ -465,48 +481,74 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
-    return Scaffold(
-      backgroundColor: t.colorScheme.surface,
-      body: SafeArea(
-        child: IndexedStack(
-          index: _tab,
-          children: [
-            _buildDash(t),
-            _buildHistory(t),
-            _MapScreen(history: _history),
-            const SettingsScreen(),
-          ],
-        ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex:         _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        backgroundColor:       t.colorScheme.surface,
-        indicatorColor:        t.colorScheme.primaryContainer.withValues(alpha: 0.5),
-        destinations: [
-          NavigationDestination(
-            icon: const Icon(Icons.speed_outlined),
-            selectedIcon: const Icon(Icons.speed),
-            label: context.tr('tabTest'),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.bar_chart_outlined),
-            selectedIcon: const Icon(Icons.bar_chart),
-            label: context.tr('tabLogs'),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.map_outlined),
-            selectedIcon: const Icon(Icons.map),
-            label: context.tr('tabMap'),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.tune_outlined),
-            selectedIcon: const Icon(Icons.tune),
-            label: context.tr('tabSettings'),
-          ),
+    return LayoutBuilder(builder: (context, constraints) {
+      final isWide = constraints.maxWidth >= 600;
+
+      final stack = IndexedStack(
+        index: _tab,
+        children: [
+          _buildDash(t),
+          _buildHistory(t),
+          _MapScreen(history: _history),
+          const SettingsScreen(),
         ],
-      ),
-    );
+      );
+
+      // Shared navigation destinations
+      final navDests = <({IconData icon, IconData selIcon, String key})>[
+        (icon: Icons.speed_outlined,      selIcon: Icons.speed,      key: 'tabTest'),
+        (icon: Icons.bar_chart_outlined,  selIcon: Icons.bar_chart,  key: 'tabLogs'),
+        (icon: Icons.map_outlined,        selIcon: Icons.map,        key: 'tabMap'),
+        (icon: Icons.tune_outlined,       selIcon: Icons.tune,       key: 'tabSettings'),
+      ];
+
+      if (isWide) {
+        // ── Wide layout: NavigationRail on the left ──────────────────────────
+        return Scaffold(
+          backgroundColor: t.colorScheme.surface,
+          body: SafeArea(
+            child: Row(children: [
+              NavigationRail(
+                selectedIndex:         _tab,
+                onDestinationSelected: (i) => setState(() => _tab = i),
+                labelType:             NavigationRailLabelType.all,
+                backgroundColor:       t.colorScheme.surface,
+                indicatorColor:        t.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                minWidth:              72,
+                destinations: navDests.map((d) => NavigationRailDestination(
+                  icon:         Icon(d.icon),
+                  selectedIcon: Icon(d.selIcon),
+                  label:        Text(context.tr(d.key),
+                      style: const TextStyle(fontSize: 11)),
+                )).toList(),
+              ),
+              VerticalDivider(
+                thickness: 1, width: 1,
+                color: t.colorScheme.onSurface.withValues(alpha: 0.08),
+              ),
+              Expanded(child: stack),
+            ]),
+          ),
+        );
+      }
+
+      // ── Mobile layout: NavigationBar at the bottom ───────────────────────
+      return Scaffold(
+        backgroundColor: t.colorScheme.surface,
+        body: SafeArea(child: stack),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex:         _tab,
+          onDestinationSelected: (i) => setState(() => _tab = i),
+          backgroundColor:       t.colorScheme.surface,
+          indicatorColor:        t.colorScheme.primaryContainer.withValues(alpha: 0.5),
+          destinations: navDests.map((d) => NavigationDestination(
+            icon:         Icon(d.icon),
+            selectedIcon: Icon(d.selIcon),
+            label:        context.tr(d.key),
+          )).toList(),
+        ),
+      );
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -524,13 +566,25 @@ class _HomeScreenState extends State<HomeScreen>
       _chart(t),
       const SizedBox(height: 10),
       _statsRow(t),
-      const SizedBox(height: 6),
-      _connInfoRow(t),
-      const SizedBox(height: 6),
-      _dualDurationRow(t),
-      const SizedBox(height: 8),
-      _quickOptions(t),
-      const SizedBox(height: 10),
+      // Controls collapse smoothly when a test is running
+      ValueListenableBuilder<bool>(
+        valueListenable: _testingNf,
+        builder: (_, testing, __) => AnimatedSize(
+          duration: const Duration(milliseconds: 380),
+          curve:    Curves.easeInOut,
+          child: testing
+              ? const SizedBox.shrink()
+              : Column(mainAxisSize: MainAxisSize.min, children: [
+                  const SizedBox(height: 6),
+                  _connInfoRow(t),
+                  const SizedBox(height: 10),
+                  _dualDurationRow(t),
+                  const SizedBox(height: 8),
+                  _quickOptions(t),
+                  const SizedBox(height: 10),
+                ]),
+        ),
+      ),
       _startBtn(t),
       const SizedBox(height: 2),
     ]),
@@ -832,8 +886,24 @@ class _HomeScreenState extends State<HomeScreen>
                 ]),
                 const SizedBox(height: 7),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Text(ctx.tr('ping'),
-                      style: _segLabel(phase == 'PING', pingDone, t, t.colorScheme.tertiary)),
+                  // PING — show value when done
+                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(ctx.tr('ping'),
+                        style: _segLabel(phase == 'PING', pingDone, t, t.colorScheme.tertiary)),
+                    if (pingDone && _pingNf.value > 0)
+                      ValueListenableBuilder<int>(
+                        valueListenable: _pingNf,
+                        builder: (_, ms, __) => Text(
+                          '$ms ms',
+                          style: t.textTheme.labelSmall?.copyWith(
+                            fontSize: 8.5, fontWeight: FontWeight.w700,
+                            color: t.colorScheme.tertiary.withValues(alpha: 0.7),
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                  ]),
+                  // DOWNLOAD — show timer when active, avg when done
                   Column(children: [
                     Text(ctx.tr('dlLabel'),
                         style: _segLabel(dlActive, dlDone, t, t.colorScheme.primary)),
@@ -846,7 +916,25 @@ class _HomeScreenState extends State<HomeScreen>
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
+                    if (dlDone)
+                      ValueListenableBuilder<double>(
+                        valueListenable: _dlAvgNf,
+                        builder: (_, avg, __) => avg > 0
+                            ? ValueListenableBuilder<int>(
+                                valueListenable: speedUnitIndexNotifier,
+                                builder: (_, ui, __) => Text(
+                                  '⌀ ${formatSpeedValue(avg, ui)} ${kSpeedUnitLabels[ui]}',
+                                  style: t.textTheme.labelSmall?.copyWith(
+                                    fontSize: 8.5, fontWeight: FontWeight.w700,
+                                    color: t.colorScheme.primary.withValues(alpha: 0.7),
+                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                  ),
+                                ),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
                   ]),
+                  // UPLOAD — show timer when active, avg when done
                   Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                     Text(ctx.tr('ulLabel'),
                         style: _segLabel(ulActive, ulDone, t, t.colorScheme.secondary)),
@@ -858,6 +946,23 @@ class _HomeScreenState extends State<HomeScreen>
                           color: t.colorScheme.onSurface.withValues(alpha: 0.32),
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
+                      ),
+                    if (ulDone)
+                      ValueListenableBuilder<double>(
+                        valueListenable: _ulAvgNf,
+                        builder: (_, avg, __) => avg > 0
+                            ? ValueListenableBuilder<int>(
+                                valueListenable: speedUnitIndexNotifier,
+                                builder: (_, ui, __) => Text(
+                                  '⌀ ${formatSpeedValue(avg, ui)} ${kSpeedUnitLabels[ui]}',
+                                  style: t.textTheme.labelSmall?.copyWith(
+                                    fontSize: 8.5, fontWeight: FontWeight.w700,
+                                    color: t.colorScheme.secondary.withValues(alpha: 0.7),
+                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                  ),
+                                ),
+                              )
+                            : const SizedBox.shrink(),
                       ),
                   ]),
                 ]),
@@ -3093,26 +3198,44 @@ class _ChartPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = color.withValues(alpha: 0.03));
     if (points.length < 2) return;
-    final maxV = points.reduce((a,b)=>a>b?a:b);
-    final cap  = maxV < 1 ? 1.0 : maxV * 1.15;
+    final maxV = points.reduce((a, b) => a > b ? a : b);
+    // Use 2× the current max so fluctuations look proportional, not dramatic.
+    // Also enforce a minimum scale so the line never fills the whole chart.
+    final cap = maxV < 1 ? 1.0 : max(maxV * 2.0, 10.0);
+
     Offset pt(int i) => Offset(
       size.width * i / (points.length - 1),
-      size.height - (points[i] / cap * size.height * 0.9 + size.height * 0.05),
+      size.height - (points[i] / cap * size.height * 0.88 + size.height * 0.06),
     );
-    final line = Path()..moveTo(pt(0).dx, pt(0).dy);
+
+    // Smooth bezier path instead of straight lines
+    final path = Path()..moveTo(pt(0).dx, pt(0).dy);
     for (int i = 1; i < points.length; i++) {
-      line.lineTo(pt(i).dx, pt(i).dy);
+      final cpx = (pt(i - 1).dx + pt(i).dx) / 2;
+      path.cubicTo(cpx, pt(i - 1).dy, cpx, pt(i).dy, pt(i).dx, pt(i).dy);
     }
-    canvas.drawPath(Path.from(line)
-        ..lineTo(size.width, size.height)..lineTo(0, size.height)..close(),
-      Paint()..shader = LinearGradient(
-        begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        colors: [color.withValues(alpha: 0.2), color.withValues(alpha: 0.0)],
-      ).createShader(Offset.zero & size));
-    canvas.drawPath(line, Paint()
-        ..style = PaintingStyle.stroke ..strokeWidth = 1.5
-        ..strokeCap = StrokeCap.round  ..strokeJoin = StrokeJoin.round
-        ..color = color.withValues(alpha: 0.8));
+
+    canvas.drawPath(
+      Path.from(path)
+        ..lineTo(size.width, size.height)
+        ..lineTo(0, size.height)
+        ..close(),
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [color.withValues(alpha: 0.18), color.withValues(alpha: 0.0)],
+        ).createShader(Offset.zero & size),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style       = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..strokeCap   = StrokeCap.round
+        ..strokeJoin  = StrokeJoin.round
+        ..color       = color.withValues(alpha: 0.8),
+    );
   }
   @override bool shouldRepaint(_ChartPainter o) => o.points != points || o.color != color;
 }
