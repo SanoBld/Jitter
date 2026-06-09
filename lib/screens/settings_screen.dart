@@ -47,6 +47,9 @@ class SettingsScreen extends StatelessWidget {
         ], t),
         const SizedBox(height: 14),
 
+        _section('PARALLEL CONNECTIONS', [const _ParallelConnsPicker()], t),
+        const SizedBox(height: 14),
+
         _section(context.tr('sDuration'), [const _DurationSlider()], t),
         const SizedBox(height: 14),
 
@@ -627,6 +630,90 @@ class _UnitPicker extends StatelessWidget {
                                 : t.colorScheme.onSurface.withValues(alpha: 0.38),
                           )),
                     ],
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+// ── Parallel connections picker ────────────────────────────────────────────
+class _ParallelConnsPicker extends StatelessWidget {
+  const _ParallelConnsPicker();
+
+  static const _options = [1, 2, 4, 8, 16];
+  static const _labels  = ['1×', '2×', '4×', '8×', '16×'];
+  static const _hints   = [
+    '~100 Mb/s',
+    '~300 Mb/s',
+    '~600 Mb/s',
+    '~1 Gbps',
+    '≥ 2.5 Gbps',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Connections per test',
+            style: t.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
+        const SizedBox(height: 4),
+        Text(
+          'More connections saturate faster links. Use 8–16× for Gbps fiber '
+          'combined with a 1 GB or 10 GB server.',
+          style: t.textTheme.bodySmall?.copyWith(
+              color: t.colorScheme.onSurface.withValues(alpha: 0.45)),
+        ),
+        const SizedBox(height: 14),
+        ValueListenableBuilder<int>(
+          valueListenable: parallelConnsNotifier,
+          builder: (_, cur, __) => Row(
+            children: List.generate(_options.length, (i) {
+              final sel = cur == _options[i];
+              return Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(right: i < _options.length - 1 ? 6 : 0),
+                  child: GestureDetector(
+                    onTap: () => setParallelConns(_options[i]),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: sel
+                            ? t.colorScheme.primary.withValues(alpha: 0.12)
+                            : t.colorScheme.onSurface.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: sel
+                              ? t.colorScheme.primary.withValues(alpha: 0.4)
+                              : t.colorScheme.onSurface.withValues(alpha: 0.08),
+                        ),
+                      ),
+                      child: Column(children: [
+                        Text(_labels[i],
+                            style: t.textTheme.titleSmall?.copyWith(
+                              fontWeight: sel ? FontWeight.w800 : FontWeight.w500,
+                              color: sel
+                                  ? t.colorScheme.primary
+                                  : t.colorScheme.onSurface.withValues(alpha: 0.7),
+                            )),
+                        const SizedBox(height: 2),
+                        Text(_hints[i],
+                            textAlign: TextAlign.center,
+                            style: t.textTheme.labelSmall?.copyWith(
+                              fontSize: 8.5,
+                              color: sel
+                                  ? t.colorScheme.primary.withValues(alpha: 0.65)
+                                  : t.colorScheme.onSurface.withValues(alpha: 0.35),
+                            )),
+                      ]),
+                    ),
                   ),
                 ),
               );

@@ -152,6 +152,9 @@ class _HomeScreenState extends State<HomeScreen>
   final _wifiSsidNf = ValueNotifier<String>('');
   final _localIpNf  = ValueNotifier<String>('');
 
+  // Cumulative average accumulators (reset per phase, not notifiers)
+  double _dlSum   = 0; int _dlCount   = 0;
+  double _ulSum   = 0; int _ulCount   = 0;
   bool   _stopRequested = false;
   Timer? _bgPingTimer;
   Timer? _elapsedTimer;
@@ -276,9 +279,11 @@ class _HomeScreenState extends State<HomeScreen>
     _progressNf.value = 0;
     _dlProgNf.value   = 0;
     _ulProgNf.value   = 0;
-    _dlAvgNf.value    = 0;
-    _ulAvgNf.value    = 0;
-    _phaseNf.value    = 'LOCATING';
+    _dlSum = 0; _dlCount = 0;
+    _ulSum = 0; _ulCount = 0;
+    _dlAvgNf.value = 0;
+    _ulAvgNf.value = 0;
+    _phaseNf.value = 'LOCATING';
     // Fetch connection info (non-blocking)
     ConnectionService.getInfo().then((info) {
       _connTypNf.value  = info.type;
@@ -374,11 +379,16 @@ class _HomeScreenState extends State<HomeScreen>
       });
     }
     await for (final mbps
-        in _svc.testDownloadSpeed(serverIndex: srv, durationSecs: dlDur)) {
+        in _svc.testDownloadSpeed(
+          serverIndex:        srv,
+          durationSecs:       dlDur,
+          parallelConnections: parallelConnsNotifier.value,
+        )) {
       if (_stopRequested) break;
-      _speedNf.value = mbps;
-      _dlNf.value    = mbps;
+      _speedNf.value = mbps;              // gauge: instantaneous
       _addPoint(mbps);
+      _dlSum += mbps; _dlCount++;
+      _dlNf.value = _dlSum / _dlCount;   // stats: running average
     }
     dlTicker?.cancel();
     if (_stopRequested) return;
@@ -406,11 +416,16 @@ class _HomeScreenState extends State<HomeScreen>
         _progressNf.value = 0.54 + 0.46 * frac;
       });
     }
-    await for (final mbps in _svc.testUploadSpeed(durationSecs: ulDur)) {
+    _ulSum = 0; _ulCount = 0;   // fresh accumulator for UL phase
+    await for (final mbps in _svc.testUploadSpeed(
+      durationSecs:        ulDur,
+      parallelConnections: parallelConnsNotifier.value,
+    )) {
       if (_stopRequested) break;
-      _speedNf.value = mbps;
-      _ulNf.value    = mbps;
+      _speedNf.value = mbps;              // gauge: instantaneous
       _addPoint(mbps);
+      _ulSum += mbps; _ulCount++;
+      _ulNf.value = _ulSum / _ulCount;   // stats: running average
     }
     ulTicker?.cancel();
     _stopBgPing();
@@ -1593,12 +1608,27 @@ class _HomeScreenState extends State<HomeScreen>
                         leading: Text(srv.flag, style: const TextStyle(fontSize: 22)),
                         title: Text(srv.name,
                             style: t.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
-                        subtitle: Text('${srv.location}  ·  ${srv.provider}',
+                        subtitle: Text(
+                            '${srv.location}  ·  ${srv.provider}\n${srv.fileSize}',
                             style: t.textTheme.bodySmall?.copyWith(
                                 color: t.colorScheme.onSurface.withValues(alpha: 0.45))),
                         trailing: sel
                             ? Icon(Icons.check_circle_rounded, color: t.colorScheme.primary)
-                            : null,
+                            : srv.minConnections >= 8
+                                ? Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: t.colorScheme.tertiaryContainer.withValues(alpha: 0.5),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text('${srv.minConnections}×',
+                                        style: t.textTheme.labelSmall?.copyWith(
+                                          fontSize: 9,
+                                          color: t.colorScheme.tertiary,
+                                          fontWeight: FontWeight.w700,
+                                        )),
+                                  )
+                                : null,
                         selected: sel,
                         selectedTileColor: t.colorScheme.primary.withValues(alpha: 0.06),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1792,8 +1822,8 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // Legacy alias
-  Future<void> _exportCsv() => _exportToFile();
+  // Legacy alias kept for settings tile compatibility
+  Future<void> _exportCsvToClipboard() => _exportToFile();
 
   // Import: paste CSV text directly in a dialog (pre-filled from clipboard)
   Future<void> _importData() async {
