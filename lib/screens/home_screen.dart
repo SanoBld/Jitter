@@ -581,29 +581,179 @@ class _HomeScreenState extends State<HomeScreen>
       _chart(t),
       const SizedBox(height: 10),
       _statsRow(t),
-      // Controls collapse smoothly when a test is running
+      const SizedBox(height: 8),
+      // Compact options bar — fades out while testing
       ValueListenableBuilder<bool>(
         valueListenable: _testingNf,
         builder: (_, testing, __) => AnimatedSize(
-          duration: const Duration(milliseconds: 380),
+          duration: const Duration(milliseconds: 350),
           curve:    Curves.easeInOut,
           child: testing
               ? const SizedBox.shrink()
-              : Column(mainAxisSize: MainAxisSize.min, children: [
-                  const SizedBox(height: 6),
-                  _connInfoRow(t),
-                  const SizedBox(height: 10),
-                  _dualDurationRow(t),
-                  const SizedBox(height: 8),
-                  _quickOptions(t),
-                  const SizedBox(height: 10),
-                ]),
+              : Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _optionsBar(t),
+                ),
         ),
       ),
       _startBtn(t),
       const SizedBox(height: 2),
     ]),
   );
+
+  // ── One compact scrollable row with all test options ───────────────────────
+  Widget _optionsBar(ThemeData t) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(children: [
+        // Server
+        ValueListenableBuilder<int>(
+          valueListenable: selectedServerNotifier,
+          builder: (_, si, __) {
+            final srv = InternetSpeedService.servers[
+                InternetSpeedService.resolveServerIndex(si)];
+            return _optChip(
+              flag:  srv.flag,
+              label: '${srv.name}',
+              sub:   srv.fileSize,
+              onTap: _showServerSheet,
+              t:     t,
+            );
+          },
+        ),
+        const SizedBox(width: 8),
+        // Duration — tap opens sheet
+        ValueListenableBuilder<bool>(
+          valueListenable: linkDurationsNotifier,
+          builder: (_, linked, __) => ValueListenableBuilder<int>(
+            valueListenable: dlDurationSecsNotifier,
+            builder: (_, dl, __) => ValueListenableBuilder<int>(
+              valueListenable: ulDurationSecsNotifier,
+              builder: (_, ul, __) => _optChip(
+                icon:  Icons.timer_outlined,
+                label: linked
+                    ? '${_fmtDur(dl)}'
+                    : '↓${_fmtDur(dl)}  ↑${_fmtDur(ul)}',
+                sub:   linked ? 'DL + UL' : 'Custom',
+                onTap: () => _showDurationSheet(t),
+                t:     t,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // Unit — tap to cycle
+        ValueListenableBuilder<int>(
+          valueListenable: speedUnitIndexNotifier,
+          builder: (_, ui, __) => _optChip(
+            icon:      Icons.speed_outlined,
+            label:     kSpeedUnitLabels[ui],
+            sub:       'Unit',
+            onTap:     () => setSpeedUnitIndex((ui + 1) % kSpeedUnitLabels.length),
+            t:         t,
+            primary:   true,
+          ),
+        ),
+        const SizedBox(width: 8),
+        // Parallel connections — info only, set in Settings
+        ValueListenableBuilder<int>(
+          valueListenable: parallelConnsNotifier,
+          builder: (_, n, __) => _optChip(
+            icon:  Icons.merge_type_rounded,
+            label: '${n}× conns',
+            sub:   'Settings',
+            onTap: () => setState(() => _tab = 3), // go to Settings
+            t:     t,
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _optChip({
+    String?       flag,
+    IconData?     icon,
+    required String label,
+    String?       sub,
+    VoidCallback? onTap,
+    required ThemeData t,
+    bool primary = false,
+  }) {
+    final color = primary ? t.colorScheme.primary : t.colorScheme.onSurface;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+        decoration: BoxDecoration(
+          color: primary
+              ? t.colorScheme.primary.withValues(alpha: 0.08)
+              : t.colorScheme.onSurface.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: primary
+                ? t.colorScheme.primary.withValues(alpha: 0.3)
+                : t.colorScheme.onSurface.withValues(alpha: 0.09),
+          ),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (flag != null) ...[
+            Text(flag, style: const TextStyle(fontSize: 13)),
+            const SizedBox(width: 6),
+          ] else if (icon != null) ...[
+            Icon(icon, size: 12, color: color.withValues(alpha: 0.55)),
+            const SizedBox(width: 5),
+          ],
+          Column(crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min, children: [
+            Text(label, style: t.textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: color.withValues(alpha: primary ? 1.0 : 0.75),
+            )),
+            if (sub != null)
+              Text(sub, style: t.textTheme.labelSmall?.copyWith(
+                fontSize: 9,
+                color: color.withValues(alpha: 0.38),
+              )),
+          ]),
+          if (onTap != null) ...[
+            const SizedBox(width: 4),
+            Icon(Icons.keyboard_arrow_down_rounded, size: 13,
+                color: color.withValues(alpha: 0.28)),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  String _fmtDur(int s) => s == 0 ? '∞' : s >= 60 ? '${s ~/ 60}m' : '${s}s';
+
+  void _showDurationSheet(ThemeData t) {
+    showModalBottomSheet(
+      context:            context,
+      isScrollControlled: true,
+      useSafeArea:        true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Center(child: Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: t.colorScheme.onSurface.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          )),
+          Text('Test Duration',
+              style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          _dualDurationRow(t),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
 
   // ── Top bar ────────────────────────────────────────────────────────────────
   Widget _topBar(ThemeData t) => Row(children: [
@@ -2024,70 +2174,219 @@ class _HomeScreenState extends State<HomeScreen>
         ...items.map((r) => _entryCard(r.e, r.i, t)),
       ]);
 
-  Widget _entryCard(_Entry e, int idx, ThemeData t) => Dismissible(
-    key:       ValueKey('${e.timestamp}_$idx'),
-    direction: DismissDirection.endToStart,
-    onDismissed: (_) => _deleteEntry(idx),
-    background: Container(
-      alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 16),
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: t.colorScheme.errorContainer.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Icon(Icons.delete_outline_rounded, color: t.colorScheme.error),
-    ),
-    child: GestureDetector(
-      onTap: () => _showEntryDetail(e),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+  Widget _entryCard(_Entry e, int idx, ThemeData t) {
+    final grade = _gradeFor(e.dl);
+    final ui    = speedUnitIndexNotifier.value;
+    return Dismissible(
+      key:       ValueKey('${e.timestamp}_$idx'),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) => _deleteEntry(idx),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding:   const EdgeInsets.only(right: 22),
+        margin:    const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
-          color:        t.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: t.colorScheme.onSurface.withValues(alpha: 0.06)),
+          color:        t.colorScheme.errorContainer.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(18),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Text(e.timestamp, style: t.textTheme.labelSmall?.copyWith(
-              color: t.colorScheme.onSurface.withValues(alpha: 0.38), fontSize: 9.5,
-            )),
-            const Spacer(),
-            if (e.lat != null)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: Icon(Icons.location_on_rounded, size: 11,
-                    color: t.colorScheme.tertiary.withValues(alpha: 0.6)),
-              ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: t.colorScheme.onSurface.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text('${e.flag}  ${e.server}  ·  ${e.provider}',
-                  style: t.textTheme.labelSmall?.copyWith(
-                    fontSize: 9.5, color: t.colorScheme.onSurface.withValues(alpha: 0.45),
-                  )),
-            ),
-          ]),
-          const SizedBox(height: 10),
-          Row(children: [
-            _histStat('↓', e.dl, e.unit, t.colorScheme.primary, t),
-            const SizedBox(width: 16),
-            _histStat('↑', e.ul, e.unit, t.colorScheme.secondary, t),
-            const SizedBox(width: 16),
-            _histStat('ping',   e.ping.toDouble(),   'ms', _pingColor(e.ping, context), t, isInt: true),
-            const SizedBox(width: 16),
-            _histStat('jitter', e.jitter.toDouble(), 'ms', _jitterColor(e.jitter, context), t, isInt: true),
-            const Spacer(),
-            Icon(Icons.chevron_right_rounded, size: 16,
-                color: t.colorScheme.onSurface.withValues(alpha: 0.22)),
-          ]),
-        ]),
+        child: Icon(Icons.delete_sweep_rounded, color: t.colorScheme.error, size: 22),
       ),
-    ),
-  );
+      child: GestureDetector(
+        onTap: () => _showEntryDetail(e),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color:        t.colorScheme.surface,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color:      t.colorScheme.shadow.withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset:     const Offset(0, 2),
+              ),
+            ],
+            border: Border.all(
+                color: t.colorScheme.onSurface.withValues(alpha: 0.07)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: IntrinsicHeight(
+              child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                // Grade colour bar on left edge
+                Container(width: 5, color: grade.color),
+
+                // Main content
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 11, 14, 11),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      // Top row: grade badge + timestamp
+                      Row(children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color:        grade.color.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(grade.icon, size: 10, color: grade.color),
+                            const SizedBox(width: 4),
+                            Text(grade.labelFor(context), style: TextStyle(
+                              fontSize:   9,
+                              fontWeight: FontWeight.w700,
+                              color:      grade.color,
+                              letterSpacing: 0.4,
+                            )),
+                          ]),
+                        ),
+                        const Spacer(),
+                        if (e.lat != null)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 5),
+                            child: Icon(Icons.location_on_rounded, size: 10,
+                                color: t.colorScheme.tertiary.withValues(alpha: 0.5)),
+                          ),
+                        Text(e.timestamp, style: t.textTheme.labelSmall?.copyWith(
+                          color:    t.colorScheme.onSurface.withValues(alpha: 0.35),
+                          fontSize: 9.5,
+                        )),
+                      ]),
+                      const SizedBox(height: 9),
+
+                      // Speed metrics row
+                      Row(children: [
+                        // DL
+                        Expanded(child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Text('↓  DOWN', style: TextStyle(
+                            fontSize: 8, fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                            color: t.colorScheme.primary.withValues(alpha: 0.55),
+                          )),
+                          const SizedBox(height: 2),
+                          RichText(text: TextSpan(children: [
+                            TextSpan(
+                              text: formatSpeedValue(e.dl, ui),
+                              style: t.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color:      t.colorScheme.primary,
+                                fontFeatures: const [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                            TextSpan(
+                              text: ' ${kSpeedUnitLabels[ui]}',
+                              style: t.textTheme.labelSmall?.copyWith(
+                                fontSize: 9,
+                                color: t.colorScheme.primary.withValues(alpha: 0.55),
+                              ),
+                            ),
+                          ])),
+                        ])),
+
+                        // UL
+                        Expanded(child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Text('↑  UP', style: TextStyle(
+                            fontSize: 8, fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                            color: t.colorScheme.secondary.withValues(alpha: 0.55),
+                          )),
+                          const SizedBox(height: 2),
+                          RichText(text: TextSpan(children: [
+                            TextSpan(
+                              text: formatSpeedValue(e.ul, ui),
+                              style: t.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color:      t.colorScheme.secondary,
+                                fontFeatures: const [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                            TextSpan(
+                              text: ' ${kSpeedUnitLabels[ui]}',
+                              style: t.textTheme.labelSmall?.copyWith(
+                                fontSize: 9,
+                                color: t.colorScheme.secondary.withValues(alpha: 0.55),
+                              ),
+                            ),
+                          ])),
+                        ])),
+
+                        // Ping
+                        Column(crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                          Text('PING', style: TextStyle(
+                            fontSize: 8, fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                            color: _pingColor(e.ping, context).withValues(alpha: 0.6),
+                          )),
+                          const SizedBox(height: 2),
+                          Text('${e.ping} ms',
+                              style: t.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color:      _pingColor(e.ping, context),
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          )),
+                        ]),
+                        const SizedBox(width: 14),
+                        // Jitter
+                        Column(crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                          Text('JITTER', style: TextStyle(
+                            fontSize: 8, fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                            color: _jitterColor(e.jitter, context).withValues(alpha: 0.6),
+                          )),
+                          const SizedBox(height: 2),
+                          Text('${e.jitter} ms',
+                              style: t.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color:      _jitterColor(e.jitter, context),
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          )),
+                        ]),
+                        const SizedBox(width: 2),
+                        Icon(Icons.chevron_right_rounded, size: 15,
+                            color: t.colorScheme.onSurface.withValues(alpha: 0.2)),
+                      ]),
+                      const SizedBox(height: 7),
+
+                      // Footer: server + location
+                      Row(children: [
+                        Text('${e.flag}  ${e.server}',
+                            style: t.textTheme.labelSmall?.copyWith(
+                              fontSize: 9.5,
+                              color: t.colorScheme.onSurface.withValues(alpha: 0.38),
+                            )),
+                        if (e.userLoc.isNotEmpty) ...[
+                          Text('  ·  ', style: TextStyle(
+                              color: t.colorScheme.onSurface.withValues(alpha: 0.2),
+                              fontSize: 9)),
+                          Icon(Icons.place_rounded, size: 9,
+                              color: t.colorScheme.onSurface.withValues(alpha: 0.28)),
+                          const SizedBox(width: 2),
+                          Flexible(child: Text(e.userLoc,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.textTheme.labelSmall?.copyWith(
+                                fontSize: 9.5,
+                                color: t.colorScheme.onSurface.withValues(alpha: 0.38),
+                              ))),
+                        ],
+                      ]),
+                    ]),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   void _showEntryDetail(_Entry entry) {
     showModalBottomSheet(
@@ -2657,18 +2956,49 @@ class _MapPinWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(mainAxisSize: MainAxisSize.min, children: [
       Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
         decoration: BoxDecoration(
           color:        color,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 6, offset: const Offset(0,3))],
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color:      color.withValues(alpha: 0.55),
+              blurRadius: 14,
+              offset:     const Offset(0, 5),
+            ),
+            BoxShadow(
+              color:      Colors.black.withValues(alpha: 0.18),
+              blurRadius: 4,
+              offset:     const Offset(0, 1),
+            ),
+          ],
         ),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11)),
-          Text(unit,  style: const TextStyle(color: Colors.white70, fontSize: 7)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color:      Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize:   13,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(width: 3),
+          Text(
+            unit,
+            style: TextStyle(
+              color:      Colors.white.withValues(alpha: 0.72),
+              fontSize:   9,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ]),
       ),
-      CustomPaint(size: const Size(12, 8), painter: _TrianglePainter(color: color)),
+      // Pointed tip
+      CustomPaint(
+        size: const Size(14, 7),
+        painter: _TrianglePainter(color: color),
+      ),
     ]);
   }
 }

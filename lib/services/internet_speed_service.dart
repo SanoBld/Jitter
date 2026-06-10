@@ -33,7 +33,31 @@ class SpeedServer {
 }
 
 class InternetSpeedService {
-  static const List<SpeedServer> servers = [
+
+  // ── Custom server (configured from Settings) ─────────────────────────────
+  static SpeedServer? _customServer;
+
+  static void setCustomServer(String name, String url) {
+    if (url.trim().isEmpty) { _customServer = null; return; }
+    _customServer = SpeedServer(
+      name:           name.trim().isEmpty ? 'Custom' : name.trim(),
+      location:       'Custom',
+      provider:       'Custom',
+      flag:           '🔧',
+      downloadUrl:    url.trim(),
+      corsCompatible: false,
+      minConnections: 4,
+      fileSize:       'Custom URL',
+    );
+  }
+
+  /// All servers including the custom one (if set) at the top.
+  static List<SpeedServer> get servers {
+    if (_customServer != null) return [_customServer!, ..._builtinServers];
+    return _builtinServers;
+  }
+
+  static const List<SpeedServer> _builtinServers = [
 
     // ── CORS-compatible — work in browser AND native ───────────────────────
     SpeedServer(

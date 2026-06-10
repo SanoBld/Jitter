@@ -161,6 +161,11 @@ const _t = <String, Map<String, String>>{
   'noGpsEntry':   {'en': 'No GPS coords for this test', 'fr': 'Pas de GPS pour ce test', 'es': 'Sin GPS para esta prueba'},
   'osmCredit':    {'en': '© OpenStreetMap contributors', 'fr': '© Contributeurs OpenStreetMap', 'es': '© Contribuidores OpenStreetMap'},
 
+  // Custom server
+  'customServer':      {'en': 'Custom server',    'fr': 'Serveur personnalisé','es': 'Servidor personalizado'},
+  'customServerSaved': {'en': 'Custom server saved','fr': 'Serveur sauvegardé', 'es': 'Servidor guardado'},
+  'customServerRemoved':{'en': 'Custom server removed','fr': 'Serveur supprimé','es': 'Servidor eliminado'},
+
   'footer': {'en': 'Jitter v1.0.0  ·  Made with Flutter', 'fr': 'Jitter v1.0.0  ·  Fait avec Flutter', 'es': 'Jitter v1.0.0  ·  Hecho con Flutter'},
 };
 

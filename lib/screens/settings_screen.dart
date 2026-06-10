@@ -41,7 +41,7 @@ class SettingsScreen extends StatelessWidget {
         const SizedBox(height: 14),
 
         _section(context.tr('sServer'), [
-          const _ServerList(),
+          const _ServerExpandable(),
           const Divider(height: 1),
           const _AutoFallbackTile(),
         ], t),
@@ -403,42 +403,319 @@ class _ColorPickerTile extends StatelessWidget {
   }
 }
 
-// ── Server list ────────────────────────────────────────────────────────────
-class _ServerList extends StatelessWidget {
-  const _ServerList();
+// ── Server expandable section ──────────────────────────────────────────────
+class _ServerExpandable extends StatefulWidget {
+  const _ServerExpandable();
+  @override
+  State<_ServerExpandable> createState() => _ServerExpandableState();
+}
+
+class _ServerExpandableState extends State<_ServerExpandable> {
+  bool _expanded = false;
+
   @override
   Widget build(BuildContext context) {
     final t       = Theme.of(context);
-    final servers = InternetSpeedService.availableServers;
+    final servers = InternetSpeedService.servers;
+
     return ValueListenableBuilder<int>(
       valueListenable: selectedServerNotifier,
-      builder: (_, selected, __) => Column(
-        children: List.generate(servers.length, (i) {
-          final s = servers[i];
-          return Column(children: [
-            RadioListTile<int>(
-              value:      i,
-              groupValue: selected,
-              onChanged:  (v) => setServer(v!),
-              title: Text('${s.flag}  ${s.name}',
-                  style: t.textTheme.bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w500)),
-              subtitle: Text('${s.location} — ${s.provider}',
-                  style: t.textTheme.bodySmall?.copyWith(
-                      color: t.colorScheme.onSurface.withValues(alpha: 0.45))),
-              dense:          true,
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 2),
+      builder: (_, selected, __) {
+        // Resolve current server safely
+        final curIdx = selected.clamp(0, servers.length - 1);
+        final cur    = servers[curIdx];
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header — always visible, tap to expand / collapse
+            InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Row(children: [
+                  Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: t.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                    ),
+                    child: Center(
+                      child: Text(cur.flag,
+                          style: const TextStyle(fontSize: 16)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(context.tr('selectServer'),
+                          style: t.textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w500)),
+                      Text(
+                        '${cur.name}  ·  ${cur.provider}  ·  ${cur.fileSize}',
+                        style: t.textTheme.bodySmall?.copyWith(
+                            color:
+                                t.colorScheme.onSurface.withValues(alpha: 0.45)),
+                      ),
+                    ],
+                  )),
+                  AnimatedRotation(
+                    turns:    _expanded ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(Icons.keyboard_arrow_down_rounded,
+                        color:
+                            t.colorScheme.onSurface.withValues(alpha: 0.4)),
+                  ),
+                ]),
+              ),
             ),
-            if (i < servers.length - 1)
-              Divider(height: 1, indent: 16,
-                  color: t.colorScheme.onSurface.withValues(alpha: 0.06)),
-          ]);
-        }),
+
+            // Expandable server list
+            AnimatedSize(
+              duration: const Duration(milliseconds: 280),
+              curve:    Curves.easeInOut,
+              child: _expanded
+                  ? Column(mainAxisSize: MainAxisSize.min, children: [
+                      Divider(
+                          height: 1,
+                          color: t.colorScheme.onSurface
+                              .withValues(alpha: 0.07)),
+                      // Built-in servers
+                      for (int i = 0; i < servers.length; i++) ...[
+                        _ServerRow(
+                          server:   servers[i],
+                          index:    i,
+                          selected: selected,
+                          onTap:    () {
+                            setServer(i);
+                            setState(() => _expanded = false);
+                          },
+                        ),
+                        if (i < servers.length - 1)
+                          Divider(
+                              height: 1,
+                              indent: 16,
+                              color: t.colorScheme.onSurface
+                                  .withValues(alpha: 0.06)),
+                      ],
+                      // Custom server input
+                      Divider(
+                          height: 1,
+                          color: t.colorScheme.onSurface
+                              .withValues(alpha: 0.07)),
+                      const _CustomServerTile(),
+                    ])
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ── Single server row (no deprecated RadioListTile) ────────────────────────
+class _ServerRow extends StatelessWidget {
+  final SpeedServer server;
+  final int         index, selected;
+  final VoidCallback onTap;
+  const _ServerRow({
+    required this.server,
+    required this.index,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t   = Theme.of(context);
+    final sel = index == selected;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        color: sel
+            ? t.colorScheme.primary.withValues(alpha: 0.05)
+            : Colors.transparent,
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(children: [
+          Text(server.flag, style: const TextStyle(fontSize: 18)),
+          const SizedBox(width: 10),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Text(server.name,
+                    style: t.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: sel ? t.colorScheme.primary : null,
+                    )),
+                if (server.minConnections >= 8) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: t.colorScheme.tertiaryContainer
+                          .withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text('${server.minConnections}×',
+                        style: t.textTheme.labelSmall?.copyWith(
+                          fontSize: 9,
+                          color:    t.colorScheme.tertiary,
+                          fontWeight: FontWeight.w700,
+                        )),
+                  ),
+                ],
+              ]),
+              Text(
+                '${server.location}  ·  ${server.provider}  ·  ${server.fileSize}',
+                style: t.textTheme.bodySmall?.copyWith(
+                    color: t.colorScheme.onSurface.withValues(alpha: 0.45)),
+              ),
+            ],
+          )),
+          if (sel)
+            Icon(Icons.check_circle_rounded,
+                color: t.colorScheme.primary, size: 20)
+          else
+            Icon(Icons.radio_button_unchecked_rounded,
+                color: t.colorScheme.onSurface.withValues(alpha: 0.25),
+                size: 20),
+        ]),
       ),
     );
   }
 }
+
+// ── Custom server URL input ────────────────────────────────────────────────
+class _CustomServerTile extends StatefulWidget {
+  const _CustomServerTile();
+  @override
+  State<_CustomServerTile> createState() => _CustomServerTileState();
+}
+
+class _CustomServerTileState extends State<_CustomServerTile> {
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _urlCtrl;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: customServerNameNotifier.value);
+    _urlCtrl  = TextEditingController(text: customServerUrlNotifier.value);
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    await setCustomServer(_nameCtrl.text.trim(), _urlCtrl.text.trim());
+    InternetSpeedService.setCustomServer(
+        _nameCtrl.text.trim(), _urlCtrl.text.trim());
+    if (mounted) {
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(_urlCtrl.text.trim().isEmpty
+            ? 'Custom server removed.'
+            : 'Custom server saved.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            width: 28, height: 28,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: t.colorScheme.secondaryContainer.withValues(alpha: 0.5),
+            ),
+            child: const Center(
+                child: Text('🔧', style: TextStyle(fontSize: 13))),
+          ),
+          const SizedBox(width: 10),
+          Text('Custom server',
+              style: t.textTheme.bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w600)),
+        ]),
+        const SizedBox(height: 4),
+        Text(
+          'Enter any direct download URL (e.g. http://192.168.1.1/file.bin).',
+          style: t.textTheme.bodySmall?.copyWith(
+              color: t.colorScheme.onSurface.withValues(alpha: 0.45)),
+        ),
+        const SizedBox(height: 12),
+        // Name field
+        TextField(
+          controller: _nameCtrl,
+          decoration: InputDecoration(
+            labelText:       'Server name',
+            hintText:        'My NAS / Local server',
+            border:          OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10)),
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 10),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 8),
+        // URL field
+        TextField(
+          controller:   _urlCtrl,
+          keyboardType: TextInputType.url,
+          decoration: InputDecoration(
+            labelText:       'Download URL',
+            hintText:        'https://… or http://192.168.x.x/…',
+            border:          OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10)),
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 10),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          if (_urlCtrl.text.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                _urlCtrl.clear();
+                _nameCtrl.text = 'Custom';
+                _save();
+              },
+              child: const Text('Remove'),
+            ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: _saving ? null : _save,
+            icon:  _saving
+                ? const SizedBox(width: 14, height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.check_rounded, size: 16),
+            label: const Text('Save'),
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+// ── Old _ServerList kept as alias (used internally) ────────────────────────
 
 // ── Auto-fallback toggle ───────────────────────────────────────────────────
 class _AutoFallbackTile extends StatelessWidget {

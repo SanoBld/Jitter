@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'services/internet_speed_service.dart';
 
 final themeModeNotifier        = ValueNotifier<ThemeMode>(ThemeMode.system);
 final useDynamicColorNotifier  = ValueNotifier<bool>(true);
 final seedColorNotifier        = ValueNotifier<Color>(kPresetColors[0]);
 final selectedServerNotifier   = ValueNotifier<int>(0);
 final speedUnitIndexNotifier   = ValueNotifier<int>(0);
-final parallelConnsNotifier    = ValueNotifier<int>(4);   // parallel DL/UL connections
+final parallelConnsNotifier    = ValueNotifier<int>(4);
+final customServerUrlNotifier  = ValueNotifier<String>('');
+final customServerNameNotifier = ValueNotifier<String>('Custom');
 final autoSaveHistoryNotifier  = ValueNotifier<bool>(true);
 final autoFallbackNotifier     = ValueNotifier<bool>(true);
 final useGpsLocationNotifier   = ValueNotifier<bool>(true);
@@ -95,6 +98,11 @@ Future<void> loadSettings() async {
 
   autoSaveHistoryNotifier.value = p.getBool('pref_auto_save')     ?? true;
   parallelConnsNotifier.value   = (p.getInt('pref_parallel_conns') ?? 4).clamp(1, 32);
+  customServerUrlNotifier.value  = p.getString('pref_custom_server_url')  ?? '';
+  customServerNameNotifier.value = p.getString('pref_custom_server_name') ?? 'Custom';
+  // Sync to service so it appears in the server list immediately
+  InternetSpeedService.setCustomServer(
+      customServerNameNotifier.value, customServerUrlNotifier.value);
   autoFallbackNotifier.value    = p.getBool('pref_auto_fallback') ?? true;
   useGpsLocationNotifier.value  = p.getBool('pref_use_gps')       ?? true;
   ipLocationNotifier.value      = p.getString('pref_ip_location') ?? '';
@@ -144,6 +152,13 @@ Future<void> setSpeedUnit(bool mbps) => setSpeedUnitIndex(mbps ? 0 : 1);
 Future<void> setParallelConns(int n) async {
   parallelConnsNotifier.value = n.clamp(1, 32);
   (await _p).setInt('pref_parallel_conns', parallelConnsNotifier.value);
+}
+
+Future<void> setCustomServer(String name, String url) async {
+  customServerNameNotifier.value = name;
+  customServerUrlNotifier.value  = url;
+  (await _p).setString('pref_custom_server_name', name);
+  (await _p).setString('pref_custom_server_url',  url);
 }
 
 Future<void> setDlDuration(int secs) async {
