@@ -156,6 +156,7 @@ class _HomeScreenState extends State<HomeScreen>
   double _dlSum   = 0; int _dlCount   = 0;
   double _ulSum   = 0; int _ulCount   = 0;
   bool   _stopRequested = false;
+  bool   _histShowStats = false; // toggle between list and trend view in History
   Timer? _bgPingTimer;
   Timer? _elapsedTimer;
 
@@ -346,7 +347,9 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _runPhases(int srv) async {
-    // Use per-phase durations from the new notifiers
+    // Resolve parallel connections: 0 = Auto → default 4
+    final rawConns = parallelConnsNotifier.value;
+    final conns    = rawConns <= 0 ? 4 : rawConns;
     final dlDur  = dlDurationSecsNotifier.value;
     final ulDur  = ulDurationSecsNotifier.value;
     final isDlInf = dlDur == 0;
@@ -380,9 +383,9 @@ class _HomeScreenState extends State<HomeScreen>
     }
     await for (final mbps
         in _svc.testDownloadSpeed(
-          serverIndex:        srv,
-          durationSecs:       dlDur,
-          parallelConnections: parallelConnsNotifier.value,
+          serverIndex:         srv,
+          durationSecs:        dlDur,
+          parallelConnections: conns,
         )) {
       if (_stopRequested) break;
       _speedNf.value = mbps;              // gauge: instantaneous
@@ -416,10 +419,10 @@ class _HomeScreenState extends State<HomeScreen>
         _progressNf.value = 0.54 + 0.46 * frac;
       });
     }
-    _ulSum = 0; _ulCount = 0;   // fresh accumulator for UL phase
+    _ulSum = 0; _ulCount = 0;
     await for (final mbps in _svc.testUploadSpeed(
       durationSecs:        ulDur,
-      parallelConnections: parallelConnsNotifier.value,
+      parallelConnections: conns,
     )) {
       if (_stopRequested) break;
       _speedNf.value = mbps;              // gauge: instantaneous
@@ -1890,13 +1893,40 @@ class _HomeScreenState extends State<HomeScreen>
                 style: t.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold, letterSpacing: 1.5)),
             if (_history.isNotEmpty)
-              Text('${_history.length} test${_history.length > 1 ? 's' : ''}  ·  ${groups.length} loc.',
-                  style: t.textTheme.bodySmall?.copyWith(
-                      color: t.colorScheme.onSurface.withValues(alpha: 0.4))),
+              Text(
+                '${_history.length} test${_history.length > 1 ? 's' : ''}  ·  ${groups.length} loc.',
+                style: t.textTheme.bodySmall?.copyWith(
+                    color: t.colorScheme.onSurface.withValues(alpha: 0.4)),
+              ),
           ]),
           const Spacer(),
+          // List / Stats toggle
+          if (_history.length >= 2)
+            Container(
+              decoration: BoxDecoration(
+                color:        t.colorScheme.onSurface.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: t.colorScheme.onSurface.withValues(alpha: 0.08)),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                _viewToggleChip(
+                  label:    context.tr('tabLogs'),
+                  icon:     Icons.list_rounded,
+                  selected: !_histShowStats,
+                  onTap:    () => setState(() => _histShowStats = false),
+                  t:        t,
+                ),
+                _viewToggleChip(
+                  label:    context.tr('trend'),
+                  icon:     Icons.show_chart_rounded,
+                  selected: _histShowStats,
+                  onTap:    () => setState(() => _histShowStats = true),
+                  t:        t,
+                ),
+              ]),
+            ),
           if (_history.isNotEmpty) ...[
-            // Export to file (share)
             IconButton(
               icon: const Icon(Icons.file_download_outlined, size: 18),
               tooltip: context.tr('exportCsv'),
@@ -1905,7 +1935,6 @@ class _HomeScreenState extends State<HomeScreen>
               visualDensity: VisualDensity.compact,
             ),
           ],
-          // Import always available
           IconButton(
             icon: const Icon(Icons.file_upload_outlined, size: 18),
             tooltip: 'Import CSV',
@@ -1928,19 +1957,57 @@ class _HomeScreenState extends State<HomeScreen>
         Expanded(
           child: _history.isEmpty
               ? _emptyState(t)
-              : ListView(children: [
-                  for (final g in groups.entries)
-                    _locationGroup(g.key, g.value, t),
-                  const SizedBox(height: 12),
-                ]),
+              : _histShowStats
+                  ? _HistoryStatsView(history: _history, t: t)
+                  : ListView(children: [
+                      for (final g in groups.entries)
+                        _locationGroup(g.key, g.value, t),
+                      const SizedBox(height: 12),
+                    ]),
         ),
       ]),
     );
   }
 
-  // Build CSV string (UTF-8 BOM so Excel opens it correctly without encoding issues)
+  Widget _viewToggleChip({
+    required String    label,
+    required IconData  icon,
+    required bool      selected,
+    required VoidCallback onTap,
+    required ThemeData t,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color:        selected
+              ? t.colorScheme.primary.withValues(alpha: 0.12)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 12,
+              color: selected
+                  ? t.colorScheme.primary
+                  : t.colorScheme.onSurface.withValues(alpha: 0.4)),
+          const SizedBox(width: 4),
+          Text(label, style: t.textTheme.labelSmall?.copyWith(
+            fontSize:   10,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+            color:      selected
+                ? t.colorScheme.primary
+                : t.colorScheme.onSurface.withValues(alpha: 0.45),
+          )),
+        ]),
+      ),
+    );
+  }
+
+  // ── CSV export/import (build, copy, parse) ────────────────────────────────
   String _buildCsv() {
-    final buf = StringBuffer('\uFEFF'); // UTF-8 BOM
+    final buf = StringBuffer('\uFEFF'); // UTF-8 BOM so Excel reads it correctly
     buf.writeln('timestamp,flag,server,provider,server_location,'
         'user_location,download_mbps,upload_mbps,ping_ms,jitter_ms,unit,lat,lng');
     for (final e in _history) {
@@ -1956,7 +2023,6 @@ class _HomeScreenState extends State<HomeScreen>
     return buf.toString();
   }
 
-  // Export: copy CSV to clipboard (UTF-8 BOM = paste directly into Excel)
   Future<void> _exportToFile() async {
     if (_history.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1972,10 +2038,6 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // Legacy alias kept for settings tile compatibility
-  Future<void> _exportCsvToClipboard() => _exportToFile();
-
-  // Import: paste CSV text directly in a dialog (pre-filled from clipboard)
   Future<void> _importData() async {
     final ctrl = TextEditingController();
 
@@ -2397,31 +2459,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _histStat(String label, double val, String unit, Color color,
-      ThemeData t, {bool isInt = false}) {
-    final display = isInt
-        ? val.toInt().toString()
-        : (val >= 100 ? val.toStringAsFixed(0) : val.toStringAsFixed(1));
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: TextStyle(
-        fontSize: 8.5, fontWeight: FontWeight.bold, letterSpacing: 0.6,
-        color: color.withValues(alpha: 0.65),
-      )),
-      const SizedBox(height: 2),
-      RichText(
-        text: TextSpan(children: [
-          TextSpan(text: display, style: t.textTheme.labelLarge?.copyWith(
-            fontWeight: FontWeight.w800, color: color, height: 1.0,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          )),
-          TextSpan(text: ' $unit', style: t.textTheme.labelSmall?.copyWith(
-            fontSize: 8.5, color: color.withValues(alpha: 0.6),
-          )),
-        ]),
-      ),
-    ]);
-  }
-
   void _confirmClear() {
     showDialog(
       context: context,
@@ -2456,6 +2493,188 @@ class _HomeScreenState extends State<HomeScreen>
   );
 } // end _HomeScreenState
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HISTORY STATS VIEW — trend charts across all history entries
+// ═══════════════════════════════════════════════════════════════════════════════
+class _HistoryStatsView extends StatefulWidget {
+  final List<_Entry> history;
+  final ThemeData    t;
+  const _HistoryStatsView({required this.history, required this.t});
+  @override
+  State<_HistoryStatsView> createState() => _HistoryStatsViewState();
+}
+
+class _HistoryStatsViewState extends State<_HistoryStatsView> {
+  int  _metric   = 0;
+  int? _hoverIdx;
+
+  List<_Entry> get _chrono => widget.history.reversed.toList();
+
+  Color _mc(int m) {
+    final t = widget.t;
+    switch (m) {
+      case 0:  return t.colorScheme.primary;
+      case 1:  return t.colorScheme.secondary;
+      case 2:  return t.colorScheme.tertiary;
+      default: return t.colorScheme.error;
+    }
+  }
+
+  static const _icons = [
+    Icons.arrow_downward_rounded, Icons.arrow_upward_rounded,
+    Icons.network_ping_rounded,   Icons.waves_rounded,
+  ];
+  static const _keys = ['down', 'up', 'ping', 'jitter'];
+
+  @override
+  Widget build(BuildContext context) {
+    final t      = widget.t;
+    final chrono = _chrono;
+    final ui     = speedUnitIndexNotifier.value;
+    final hover  = _hoverIdx != null && _hoverIdx! < chrono.length
+        ? chrono[_hoverIdx!]
+        : null;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Summary stats
+        Row(children: List.generate(4, (m) {
+          final color = _mc(m);
+          final vals  = chrono.map((e) {
+            switch (m) {
+              case 0:  return e.dl;
+              case 1:  return e.ul;
+              case 2:  return e.ping.toDouble();
+              default: return e.jitter.toDouble();
+            }
+          }).toList();
+          final avg = vals.reduce((a, b) => a + b) / vals.length;
+          final mx  = vals.reduce((a, b) => a > b ? a : b);
+          final mn  = vals.reduce((a, b) => a < b ? a : b);
+          final dispVal = m < 2
+              ? formatSpeedValue(avg, ui)
+              : avg.toStringAsFixed(0);
+          final unit = m < 2 ? kSpeedUnitLabels[ui] : 'ms';
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _metric = m),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                margin: EdgeInsets.only(right: m < 3 ? 8 : 0, bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: m == _metric
+                      ? color.withValues(alpha: 0.1)
+                      : t.colorScheme.onSurface.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: m == _metric
+                        ? color.withValues(alpha: 0.35)
+                        : t.colorScheme.onSurface.withValues(alpha: 0.07),
+                    width: m == _metric ? 1.5 : 1,
+                  ),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Icon(_icons[m], size: 12, color: color.withValues(alpha: 0.7)),
+                  const SizedBox(height: 6),
+                  Text('⌀ $dispVal', style: t.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800, color: color, height: 1,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  )),
+                  Text(unit, style: TextStyle(fontSize: 8, color: color.withValues(alpha: 0.6))),
+                  const SizedBox(height: 4),
+                  Text(
+                    m < 2
+                        ? '↑${formatSpeedValue(mx, ui)}  ↓${formatSpeedValue(mn, ui)}'
+                        : '↑${mx.toStringAsFixed(0)}  ↓${mn.toStringAsFixed(0)} ms',
+                    style: t.textTheme.labelSmall?.copyWith(
+                      fontSize: 8.5,
+                      color: t.colorScheme.onSurface.withValues(alpha: 0.38),
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          );
+        })),
+
+        // Metric selector tabs
+        SizedBox(height: 28, child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: 4,
+          separatorBuilder: (_, __) => const SizedBox(width: 6),
+          itemBuilder: (_, m) {
+            final sel   = m == _metric;
+            final color = _mc(m);
+            return GestureDetector(
+              onTap: () => setState(() { _metric = m; _hoverIdx = null; }),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: sel ? color.withValues(alpha: 0.12) : t.colorScheme.onSurface.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: sel ? color.withValues(alpha: 0.4) : t.colorScheme.onSurface.withValues(alpha: 0.08)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(_icons[m], size: 10, color: color.withValues(alpha: sel ? 1.0 : 0.5)),
+                  const SizedBox(width: 4),
+                  Text(context.tr(_keys[m]), style: t.textTheme.labelSmall?.copyWith(
+                    fontSize: 10,
+                    fontWeight: sel ? FontWeight.w700 : FontWeight.w400,
+                    color: sel ? color : t.colorScheme.onSurface.withValues(alpha: 0.5),
+                  )),
+                ]),
+              ),
+            );
+          },
+        )),
+        const SizedBox(height: 10),
+
+        // Hover timestamp
+        if (hover != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(hover.timestamp, style: t.textTheme.labelSmall?.copyWith(
+              color: t.colorScheme.onSurface.withValues(alpha: 0.45))),
+          ),
+
+        // Interactive trend chart
+        Container(
+          height: 200,
+          decoration: BoxDecoration(
+            color:        t.colorScheme.onSurface.withValues(alpha: 0.03),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: t.colorScheme.onSurface.withValues(alpha: 0.06)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: _TrendChart(
+              entries:     chrono,
+              selectedIdx: chrono.length - 1,
+              metric:      _metric,
+              color:       _mc(_metric),
+              t:           t,
+              onHover:     (idx) => setState(() => _hoverIdx = idx),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text(chrono.first.timestamp.length >= 10 ? chrono.first.timestamp.substring(5, 10) : '',
+              style: t.textTheme.labelSmall?.copyWith(fontSize: 9, color: t.colorScheme.onSurface.withValues(alpha: 0.3))),
+          Text('${chrono.length} tests',
+              style: t.textTheme.labelSmall?.copyWith(fontSize: 9, color: t.colorScheme.onSurface.withValues(alpha: 0.3))),
+          Text(chrono.last.timestamp.length >= 10 ? chrono.last.timestamp.substring(5, 10) : '',
+              style: t.textTheme.labelSmall?.copyWith(fontSize: 9, color: t.colorScheme.onSurface.withValues(alpha: 0.3))),
+        ]),
+      ]),
+    );
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ANIMATED POP STAT — numbers slide+scale in when value changes
@@ -2777,89 +2996,7 @@ class _EntryDetailSheetState extends State<_EntryDetailSheet> {
               const SizedBox(height: 24),
             ],
 
-            // ── Trend chart ─────────────────────────────────────────────────
-            if (chrono.length > 1) ...[
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text(context.tr('trend'), style: t.textTheme.labelSmall?.copyWith(
-                  color: t.colorScheme.primary, fontWeight: FontWeight.bold, letterSpacing: 1.5,
-                )),
-                if (_hoverIdx != null)
-                  Text(_chrono[_hoverIdx!].timestamp,
-                      style: t.textTheme.labelSmall?.copyWith(
-                          color: t.colorScheme.onSurface.withValues(alpha: 0.5))),
-              ]),
-              const SizedBox(height: 10),
-              // Metric tabs
-              SizedBox(height: 28, child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: 4,
-                separatorBuilder: (_, __) => const SizedBox(width: 6),
-                itemBuilder: (_, m) {
-                  final sel   = m == _metric;
-                  final color = _metricColor(m, t);
-                  return GestureDetector(
-                    onTap: () => setState(() => _metric = m),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 160),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: sel
-                            ? color.withValues(alpha: 0.12)
-                            : t.colorScheme.onSurface.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: sel ? color.withValues(alpha: 0.4)
-                              : t.colorScheme.onSurface.withValues(alpha: 0.08),
-                        ),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(_metricIcons[m], size: 10,
-                            color: color.withValues(alpha: sel ? 1.0 : 0.5)),
-                        const SizedBox(width: 4),
-                        Text(context.tr(_metricKeys[m]),
-                            style: t.textTheme.labelSmall?.copyWith(
-                              fontSize: 10,
-                              fontWeight: sel ? FontWeight.w700 : FontWeight.w400,
-                              color: sel ? color : t.colorScheme.onSurface.withValues(alpha: 0.5),
-                            )),
-                      ]),
-                    ),
-                  );
-                },
-              )),
-              const SizedBox(height: 12),
-              Container(
-                height: 190,
-                decoration: BoxDecoration(
-                  color:        t.colorScheme.onSurface.withValues(alpha: 0.03),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: t.colorScheme.onSurface.withValues(alpha: 0.06)),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: _TrendChart(
-                    entries:     chrono,
-                    selectedIdx: _selectedIdx,
-                    metric:      _metric,
-                    color:       _metricColor(_metric, t),
-                    t:           t,
-                    onHover:     (idx) => setState(() => _hoverIdx = idx),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text(_chrono.first.timestamp.substring(5, 10),
-                    style: t.textTheme.labelSmall?.copyWith(
-                        fontSize: 9, color: t.colorScheme.onSurface.withValues(alpha: 0.35))),
-                Text(_chrono.last.timestamp.substring(5, 10),
-                    style: t.textTheme.labelSmall?.copyWith(
-                        fontSize: 9, color: t.colorScheme.onSurface.withValues(alpha: 0.35))),
-              ]),
-              const SizedBox(height: 24),
-            ],
-
-            // ── VS Average ──────────────────────────────────────────────────
+            // ── VS Average (compared to all history) ─────────────────────────
             if (chrono.length > 1) ...[
               Text(context.tr('vsAverage'), style: t.textTheme.labelSmall?.copyWith(
                 color: t.colorScheme.primary, fontWeight: FontWeight.bold, letterSpacing: 1.5,
@@ -2956,49 +3093,35 @@ class _MapPinWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(mainAxisSize: MainAxisSize.min, children: [
       Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+        // Constrain max width so long values (e.g. "0.0065 GB/s") stay inside
+        constraints: const BoxConstraints(maxWidth: 90),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
           color:        color,
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
-            BoxShadow(
-              color:      color.withValues(alpha: 0.55),
-              blurRadius: 14,
-              offset:     const Offset(0, 5),
-            ),
-            BoxShadow(
-              color:      Colors.black.withValues(alpha: 0.18),
-              blurRadius: 4,
-              offset:     const Offset(0, 1),
-            ),
+            BoxShadow(color: color.withValues(alpha: 0.55), blurRadius: 14, offset: const Offset(0, 5)),
+            BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 4, offset: const Offset(0, 1)),
           ],
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color:      Colors.white,
-              fontWeight: FontWeight.w800,
-              fontSize:   13,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(width: 3),
-          Text(
-            unit,
-            style: TextStyle(
-              color:      Colors.white.withValues(alpha: 0.72),
-              fontSize:   9,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ]),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(label,
+                style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.w800,
+                  fontSize: 13, letterSpacing: -0.3,
+                )),
+            const SizedBox(width: 3),
+            Text(unit,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.72),
+                  fontSize: 9, fontWeight: FontWeight.w500,
+                )),
+          ]),
+        ),
       ),
-      // Pointed tip
-      CustomPaint(
-        size: const Size(14, 7),
-        painter: _TrianglePainter(color: color),
-      ),
+      CustomPaint(size: const Size(14, 7), painter: _TrianglePainter(color: color)),
     ]);
   }
 }
@@ -3077,8 +3200,8 @@ class _MapScreenState extends State<_MapScreen> {
               final isSel = _selected == e;
               return Marker(
                 point:  LatLng(e.lat!, e.lng!),
-                width:  isSel ? 72 : 58,
-                height: isSel ? 64 : 52,
+                width:  isSel ? 100 : 82,
+                height: isSel ? 64  : 54,
                 child: GestureDetector(
                   onTap: () => setState(() => _selected = _selected == e ? null : e),
                   child: AnimatedScale(
@@ -3310,9 +3433,8 @@ class _TrendChartState extends State<_TrendChart> {
     onPanStart:  (d) => _touch(d.localPosition),
     onPanUpdate: (d) => _touch(d.localPosition),
     onPanEnd:    (_) => _end(),
-    // LayoutBuilder gives us the ACTUAL pixel dimensions from the parent Container
-    // (height: 190 + column width). This is reliable on all platforms,
-    // unlike SizedBox.expand() which breaks inside unbounded scroll views on mobile.
+    // LayoutBuilder gives the actual pixel size from the parent Container,
+    // which is reliable inside unbounded scroll views (unlike SizedBox.expand).
     child: LayoutBuilder(
       builder: (_, constraints) {
         _cachedWidth = constraints.maxWidth;
@@ -3559,8 +3681,7 @@ class _ChartPainter extends CustomPainter {
     canvas.drawRect(Offset.zero & size, Paint()..color = color.withValues(alpha: 0.03));
     if (points.length < 2) return;
     final maxV = points.reduce((a, b) => a > b ? a : b);
-    // Use 2× the current max so fluctuations look proportional, not dramatic.
-    // Also enforce a minimum scale so the line never fills the whole chart.
+    // Scale to 2x current max (min 10) so fluctuations look proportional, not maxed out
     final cap = maxV < 1 ? 1.0 : max(maxV * 2.0, 10.0);
 
     Offset pt(int i) => Offset(
@@ -3568,7 +3689,7 @@ class _ChartPainter extends CustomPainter {
       size.height - (points[i] / cap * size.height * 0.88 + size.height * 0.06),
     );
 
-    // Smooth bezier path instead of straight lines
+    // Smooth bezier path
     final path = Path()..moveTo(pt(0).dx, pt(0).dy);
     for (int i = 1; i < points.length; i++) {
       final cpx = (pt(i - 1).dx + pt(i).dx) / 2;

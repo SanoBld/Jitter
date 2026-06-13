@@ -837,16 +837,9 @@ class _DurationSlider extends StatelessWidget {
   }
 }
 
-// ── Unit picker — 4 options in a 2×2 grid ─────────────────────────────────
+// ── Unit picker — dropdown ─────────────────────────────────────────────────
 class _UnitPicker extends StatelessWidget {
   const _UnitPicker();
-
-  static const _descriptions = [
-    'megabits/s  (standard)',
-    'megabytes/s  (÷ 8)',
-    'gigabits/s  (÷ 1 000)',
-    'gigabytes/s  (÷ 8 000)',
-  ];
 
   @override
   Widget build(BuildContext context) {
@@ -863,54 +856,51 @@ class _UnitPicker extends StatelessWidget {
         const SizedBox(height: 14),
         ValueListenableBuilder<int>(
           valueListenable: speedUnitIndexNotifier,
-          builder: (_, cur, __) => GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap:     true,
-            physics:        const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 8,
-            mainAxisSpacing:  8,
-            childAspectRatio: 2.8,
-            children: List.generate(kSpeedUnitLabels.length, (i) {
-              final sel = cur == i;
-              return GestureDetector(
-                onTap: () => setSpeedUnitIndex(i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: sel
-                        ? t.colorScheme.primary.withValues(alpha: 0.12)
-                        : t.colorScheme.onSurface.withValues(alpha: 0.04),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: sel
-                          ? t.colorScheme.primary.withValues(alpha: 0.4)
-                          : t.colorScheme.onSurface.withValues(alpha: 0.08),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(kSpeedUnitLabels[i],
+          builder: (_, cur, __) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            decoration: BoxDecoration(
+              color:        t.colorScheme.onSurface.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: t.colorScheme.onSurface.withValues(alpha: 0.12)),
+            ),
+            child: DropdownButton<int>(
+              value:        cur.clamp(0, kSpeedUnitLabels.length - 1),
+              isExpanded:   true,
+              underline:    const SizedBox.shrink(),
+              borderRadius: BorderRadius.circular(12),
+              onChanged:    (v) { if (v != null) setSpeedUnitIndex(v); },
+              items: List.generate(kSpeedUnitLabels.length, (i) =>
+                DropdownMenuItem<int>(
+                  value: i,
+                  child: Row(children: [
+                    Container(
+                      width: 42, height: 26,
+                      decoration: BoxDecoration(
+                        color: i == cur
+                            ? t.colorScheme.primary.withValues(alpha: 0.12)
+                            : t.colorScheme.onSurface.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(kSpeedUnitLabels[i],
                           style: t.textTheme.labelMedium?.copyWith(
-                            fontWeight: sel ? FontWeight.w800 : FontWeight.w600,
-                            color: sel
+                            fontWeight: FontWeight.w700,
+                            color: i == cur
                                 ? t.colorScheme.primary
-                                : t.colorScheme.onSurface.withValues(alpha: 0.75),
+                                : t.colorScheme.onSurface.withValues(alpha: 0.7),
                           )),
-                      Text(_descriptions[i],
-                          style: t.textTheme.labelSmall?.copyWith(
-                            fontSize: 9,
-                            color: sel
-                                ? t.colorScheme.primary.withValues(alpha: 0.65)
-                                : t.colorScheme.onSurface.withValues(alpha: 0.38),
-                          )),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(kSpeedUnitDescriptions[i],
+                        style: t.textTheme.bodySmall?.copyWith(
+                          color: t.colorScheme.onSurface.withValues(alpha: 0.5),
+                          fontSize: 12,
+                        )),
+                  ]),
                 ),
-              );
-            }),
+              ),
+            ),
           ),
         ),
       ]),
@@ -919,18 +909,61 @@ class _UnitPicker extends StatelessWidget {
 }
 
 // ── Parallel connections picker ────────────────────────────────────────────
-class _ParallelConnsPicker extends StatelessWidget {
+class _ParallelConnsPicker extends StatefulWidget {
   const _ParallelConnsPicker();
+  @override
+  State<_ParallelConnsPicker> createState() => _ParallelConnsPickerState();
+}
 
-  static const _options = [1, 2, 4, 8, 16];
-  static const _labels  = ['1×', '2×', '4×', '8×', '16×'];
-  static const _hints   = [
-    '~100 Mb/s',
-    '~300 Mb/s',
-    '~600 Mb/s',
-    '~1 Gbps',
-    '≥ 2.5 Gbps',
+class _ParallelConnsPickerState extends State<_ParallelConnsPicker> {
+  // 0 = Auto, positive = exact count
+  static const _presets  = [0, 1, 2, 4, 8, 16];
+  static const _pLabels  = ['Auto', '1×', '2×', '4×', '8×', '16×'];
+  static const _pHints   = [
+    'Smart\ndefault',
+    '~100\nMb/s',
+    '~300\nMb/s',
+    '~600\nMb/s',
+    '~1\nGbps',
+    '≥2.5\nGbps',
   ];
+
+  bool get _isCustom => !_presets.contains(parallelConnsNotifier.value);
+
+  Future<void> _pickCustom() async {
+    final t    = Theme.of(context);
+    final ctrl = TextEditingController(
+        text: _isCustom ? '${parallelConnsNotifier.value}' : '');
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Custom connections'),
+        content: TextField(
+          controller:   ctrl,
+          autofocus:    true,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText:      'Number of parallel connections',
+            hintText:       '1 – 64',
+            border:         OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            suffixText:     '×',
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final v = int.tryParse(ctrl.text.trim());
+              if (v != null && v >= 1 && v <= 64) Navigator.pop(ctx, v);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (result != null) setParallelConns(result);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -942,59 +975,95 @@ class _ParallelConnsPicker extends StatelessWidget {
             style: t.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
         const SizedBox(height: 4),
         Text(
-          'More connections saturate faster links. Use 8–16× for Gbps fiber '
-          'combined with a 1 GB or 10 GB server.',
+          'More connections saturate faster links.\n'
+          'Use 8–16× combined with a 1 GB / 10 GB server for Gbps fiber.',
           style: t.textTheme.bodySmall?.copyWith(
               color: t.colorScheme.onSurface.withValues(alpha: 0.45)),
         ),
         const SizedBox(height: 14),
         ValueListenableBuilder<int>(
           valueListenable: parallelConnsNotifier,
-          builder: (_, cur, __) => Row(
-            children: List.generate(_options.length, (i) {
-              final sel = cur == _options[i];
-              return Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(right: i < _options.length - 1 ? 6 : 0),
-                  child: GestureDetector(
-                    onTap: () => setParallelConns(_options[i]),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
+          builder: (_, cur, __) => Wrap(
+            spacing: 8, runSpacing: 8,
+            children: [
+              // Preset chips
+              ...List.generate(_presets.length, (i) {
+                final sel   = cur == _presets[i] && !_isCustom;
+                final color = _presets[i] == 0
+                    ? t.colorScheme.tertiary
+                    : t.colorScheme.primary;
+                return GestureDetector(
+                  onTap: () => setParallelConns(_presets[i]),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: sel
+                          ? color.withValues(alpha: 0.12)
+                          : t.colorScheme.onSurface.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
                         color: sel
-                            ? t.colorScheme.primary.withValues(alpha: 0.12)
-                            : t.colorScheme.onSurface.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: sel
-                              ? t.colorScheme.primary.withValues(alpha: 0.4)
-                              : t.colorScheme.onSurface.withValues(alpha: 0.08),
-                        ),
+                            ? color.withValues(alpha: 0.4)
+                            : t.colorScheme.onSurface.withValues(alpha: 0.09),
+                        width: sel ? 1.5 : 1,
                       ),
-                      child: Column(children: [
-                        Text(_labels[i],
-                            style: t.textTheme.titleSmall?.copyWith(
-                              fontWeight: sel ? FontWeight.w800 : FontWeight.w500,
-                              color: sel
-                                  ? t.colorScheme.primary
-                                  : t.colorScheme.onSurface.withValues(alpha: 0.7),
-                            )),
-                        const SizedBox(height: 2),
-                        Text(_hints[i],
-                            textAlign: TextAlign.center,
-                            style: t.textTheme.labelSmall?.copyWith(
-                              fontSize: 8.5,
-                              color: sel
-                                  ? t.colorScheme.primary.withValues(alpha: 0.65)
-                                  : t.colorScheme.onSurface.withValues(alpha: 0.35),
-                            )),
-                      ]),
+                    ),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text(_pLabels[i],
+                          style: t.textTheme.labelMedium?.copyWith(
+                            fontWeight: sel ? FontWeight.w800 : FontWeight.w600,
+                            color: sel ? color : t.colorScheme.onSurface.withValues(alpha: 0.65),
+                          )),
+                      Text(_pHints[i],
+                          textAlign: TextAlign.center,
+                          style: t.textTheme.labelSmall?.copyWith(
+                            fontSize: 8.5,
+                            color: sel
+                                ? color.withValues(alpha: 0.6)
+                                : t.colorScheme.onSurface.withValues(alpha: 0.32),
+                          )),
+                    ]),
+                  ),
+                );
+              }),
+              // Custom chip
+              GestureDetector(
+                onTap: _pickCustom,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _isCustom
+                        ? t.colorScheme.secondary.withValues(alpha: 0.12)
+                        : t.colorScheme.onSurface.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _isCustom
+                          ? t.colorScheme.secondary.withValues(alpha: 0.4)
+                          : t.colorScheme.onSurface.withValues(alpha: 0.09),
+                      width: _isCustom ? 1.5 : 1,
                     ),
                   ),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(_isCustom ? '${cur}×' : 'Custom',
+                        style: t.textTheme.labelMedium?.copyWith(
+                          fontWeight: _isCustom ? FontWeight.w800 : FontWeight.w600,
+                          color: _isCustom
+                              ? t.colorScheme.secondary
+                              : t.colorScheme.onSurface.withValues(alpha: 0.65),
+                        )),
+                    Text(_isCustom ? '${cur} conns' : '1 – 64',
+                        style: t.textTheme.labelSmall?.copyWith(
+                          fontSize: 8.5,
+                          color: _isCustom
+                              ? t.colorScheme.secondary.withValues(alpha: 0.6)
+                              : t.colorScheme.onSurface.withValues(alpha: 0.32),
+                        )),
+                  ]),
                 ),
-              );
-            }),
+              ),
+            ],
           ),
         ),
       ]),

@@ -161,10 +161,40 @@ const _t = <String, Map<String, String>>{
   'noGpsEntry':   {'en': 'No GPS coords for this test', 'fr': 'Pas de GPS pour ce test', 'es': 'Sin GPS para esta prueba'},
   'osmCredit':    {'en': '© OpenStreetMap contributors', 'fr': '© Contributeurs OpenStreetMap', 'es': '© Contribuidores OpenStreetMap'},
 
+  // Speed units (full descriptions for dropdown)
+  'unitMbps':  {'en': 'Mb/s — Megabits/second (standard)', 'fr': 'Mb/s — Mégabits/seconde (standard)',  'es': 'Mb/s — Megabits/segundo (estándar)'},
+  'unitMBps':  {'en': 'MB/s — Megabytes/second (÷ 8)',    'fr': 'Mo/s — Mégaoctets/seconde (÷ 8)',     'es': 'MB/s — Megabytes/segundo (÷ 8)'},
+  'unitGbps':  {'en': 'Gb/s — Gigabits/second (÷ 1 000)', 'fr': 'Gb/s — Gigabits/seconde (÷ 1 000)',  'es': 'Gb/s — Gigabits/segundo (÷ 1 000)'},
+  'unitGBps':  {'en': 'GB/s — Gigabytes/second (÷ 8 000)','fr': 'Go/s — Gigaoctets/seconde (÷ 8 000)','es': 'GB/s — Gigabytes/segundo (÷ 8 000)'},
+  'unitKbps':  {'en': 'Kb/s — Kilobits/second (× 1 000)', 'fr': 'Kb/s — Kilobits/seconde (× 1 000)',  'es': 'Kb/s — Kilobits/segundo (× 1 000)'},
+  'unitKBps':  {'en': 'KB/s — Kilobytes/second (× 125)',  'fr': 'Ko/s — Kilooctets/seconde (× 125)',  'es': 'KB/s — Kilobytes/segundo (× 125)'},
+
+  // Parallel connections
+  'parallelConns':    {'en': 'Connections per test','fr': 'Connexions par test', 'es': 'Conexiones por prueba'},
+  'parallelAuto':     {'en': 'Auto',                'fr': 'Auto',                'es': 'Auto'},
+  'parallelCustom':   {'en': 'Custom',              'fr': 'Personnalisé',        'es': 'Personalizado'},
+  'parallelHint':     {
+    'en': 'More connections saturate faster links. Use 8–16× with a 1 GB+ server for Gbps fiber.',
+    'fr': 'Plus de connexions saturent les liens rapides. Utilisez 8–16× avec un serveur 1 Go+ pour la fibre Gbps.',
+    'es': 'Más conexiones saturan enlaces rápidos. Use 8–16× con un servidor 1 GB+ para fibra Gbps.',
+  },
+
   // Custom server
-  'customServer':      {'en': 'Custom server',    'fr': 'Serveur personnalisé','es': 'Servidor personalizado'},
-  'customServerSaved': {'en': 'Custom server saved','fr': 'Serveur sauvegardé', 'es': 'Servidor guardado'},
-  'customServerRemoved':{'en': 'Custom server removed','fr': 'Serveur supprimé','es': 'Servidor eliminado'},
+  'customServer':       {'en': 'Custom server',       'fr': 'Serveur personnalisé', 'es': 'Servidor personalizado'},
+  'customServerSaved':  {'en': 'Custom server saved', 'fr': 'Serveur sauvegardé',   'es': 'Servidor guardado'},
+  'customServerRemoved':{'en': 'Custom server removed','fr': 'Serveur supprimé',     'es': 'Servidor eliminado'},
+
+  // History statistics view
+  'histStats':    {'en': 'Statistics',   'fr': 'Statistiques', 'es': 'Estadísticas'},
+  'histList':     {'en': 'List',         'fr': 'Liste',        'es': 'Lista'},
+  'allTests':     {'en': 'All tests',    'fr': 'Tous les tests','es': 'Todas las pruebas'},
+  'noStatsYet':   {'en': 'Run at least 2 tests to see trends.', 'fr': 'Lancez au moins 2 tests pour voir les tendances.', 'es': 'Ejecuta al menos 2 pruebas para ver tendencias.'},
+
+  // Connection info chips
+  'connWifi':     {'en': 'Wi-Fi',        'fr': 'Wi-Fi',        'es': 'Wi-Fi'},
+  'connMobile':   {'en': 'Mobile',       'fr': 'Mobile',       'es': 'Móvil'},
+  'connEthernet': {'en': 'Ethernet',     'fr': 'Ethernet',     'es': 'Ethernet'},
+  'connLocalIp':  {'en': 'Local IP',     'fr': 'IP locale',    'es': 'IP local'},
 
   'footer': {'en': 'Jitter v1.0.0  ·  Made with Flutter', 'fr': 'Jitter v1.0.0  ·  Fait avec Flutter', 'es': 'Jitter v1.0.0  ·  Hecho con Flutter'},
 };

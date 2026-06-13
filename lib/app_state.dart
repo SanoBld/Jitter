@@ -44,13 +44,33 @@ String get activeLocation {
 ValueNotifier<String> get userLocationNotifier => ipLocationNotifier;
 
 // ── Speed unit helpers ─────────────────────────────────────────────────────
-const List<String> kSpeedUnitLabels = ['Mb/s', 'MB/s', 'Gb/s', 'GB/s'];
+/// Indices 0-3 kept for backward compat with saved prefs.
+/// 4 and 5 are new additions (Kb/s and KB/s for slow connections).
+const List<String> kSpeedUnitLabels = [
+  'Mb/s',  // 0 — megabits/s   (base)
+  'MB/s',  // 1 — megabytes/s  (÷ 8)
+  'Gb/s',  // 2 — gigabits/s   (÷ 1 000)
+  'GB/s',  // 3 — gigabytes/s  (÷ 8 000)
+  'Kb/s',  // 4 — kilobits/s   (× 1 000)
+  'KB/s',  // 5 — kilobytes/s  (× 125)
+];
+
+const List<String> kSpeedUnitDescriptions = [
+  'Megabits / second (standard)',
+  'Megabytes / second  (÷ 8)',
+  'Gigabits / second  (÷ 1 000)',
+  'Gigabytes / second  (÷ 8 000)',
+  'Kilobits / second  (× 1 000)',
+  'Kilobytes / second  (× 125)',
+];
 
 double convertSpeed(double mbps, int unitIdx) {
   switch (unitIdx) {
     case 1: return mbps / 8;
     case 2: return mbps / 1000;
     case 3: return mbps / 8000;
+    case 4: return mbps * 1000;
+    case 5: return mbps * 125;
     default: return mbps;
   }
 }
@@ -58,12 +78,15 @@ double convertSpeed(double mbps, int unitIdx) {
 String formatSpeedValue(double mbps, int unitIdx) {
   final v = convertSpeed(mbps, unitIdx);
   switch (unitIdx) {
-    case 2:
-    case 3:
+    case 2: // Gb/s
+    case 3: // GB/s
       if (v >= 1.0) return v.toStringAsFixed(2);
       if (v >= 0.1) return v.toStringAsFixed(3);
       return v.toStringAsFixed(4);
-    default:
+    case 4: // Kb/s
+    case 5: // KB/s
+      return v >= 10000 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+    default: // Mb/s or MB/s
       return v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
   }
 }
