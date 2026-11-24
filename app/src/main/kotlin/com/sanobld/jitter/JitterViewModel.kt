@@ -174,7 +174,7 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun backgroundPing(url: String) {
         val hist = ArrayList<Int>()
         while (true) {
-            delay(2000)
+            delay(3000)
             val ms = SpeedService.pingOnce(url)
             if (ms >= 0) {
                 hist.add(ms)

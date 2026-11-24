@@ -28,6 +28,7 @@ import java.io.IOException
 import java.util.Random
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 
@@ -69,6 +70,9 @@ object SpeedService {
         .build()
 
     /** Short timeouts so a dead server fails fast instead of blocking the test. */
+    /** Last HTTP error code seen by a transfer worker (0 = none). */
+    private val lastCode = AtomicInteger(0)
+
     private val pingClient: OkHttpClient = client.newBuilder()
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(4, TimeUnit.SECONDS)
@@ -96,7 +100,7 @@ object SpeedService {
             withTimeout(timeoutMs) {
                 pingClient.newCall(req).await().use { r ->
                     val ms = ((System.nanoTime() - t0) / 1_000_000).toInt()
-                    if (r.code == 200 || r.code == 206 || r.code == 416) ms to "" else -1 to "HTTP ${r.code}"
+                    if (r.code == 200 || r.code == 206 || r.code == 416 || r.code == 429) ms to "" else -1 to "HTTP ${r.code}"
                 }
             }
         } catch (e: TimeoutCancellationException) {
@@ -134,7 +138,7 @@ object SpeedService {
             }
             fails = 0
             if (i > 0) v.add(ms)
-            delay(100)
+            delay(250)
         }
         if (v.isEmpty()) throw AppError("err_unreachable", reason)
         return PingResult(v.average().toInt(), jitterOf(v))
@@ -148,7 +152,8 @@ object SpeedService {
                 calls.add(call)
                 call.execute().use { r ->
                     if (!r.isSuccessful) {
-                        Thread.sleep(300)
+                        lastCode.set(r.code)
+                        Thread.sleep(if (r.code == 429) 2000 else 300)
                     } else {
                         val s = r.body!!.byteStream()
                         while (active()) {
@@ -173,7 +178,10 @@ object SpeedService {
                 calls.add(call)
                 call.execute().use { r ->
                     r.body?.bytes()
-                    if (!r.isSuccessful) Thread.sleep(300)
+                    if (!r.isSuccessful) {
+                        lastCode.set(r.code)
+                        Thread.sleep(if (r.code == 429) 2000 else 300)
+                    }
                 }
             } catch (e: IOException) {
                 if (active()) Thread.sleep(300)
@@ -182,6 +190,7 @@ object SpeedService {
     }
 
     private fun measure(secs: Int, conns: Int, worker: Worker): Flow<Sample> = channelFlow {
+        lastCode.set(0)
         val total = AtomicLong(0)
         val calls = ConcurrentLinkedQueue<Call>()
         val limit = if (secs == 0) 600_000L else secs * 1000L
@@ -205,7 +214,10 @@ object SpeedService {
             delay(250)
             val ms = (System.nanoTime() - t0) / 1_000_000
             val b = total.get()
-            if (ms > 6000 && b == 0L) throw AppError("err_no_data")
+            if (ms > 6000 && b == 0L) {
+                val c = lastCode.get()
+                throw if (c > 0) AppError("err_http", c.toString()) else AppError("err_no_data")
+            }
             hist.addLast(ms to b)
             while (hist.size > 1 && ms - hist.first().first > 1000) hist.removeFirst()
             val (m0, b0) = hist.first()

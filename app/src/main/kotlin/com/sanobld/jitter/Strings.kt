@@ -179,6 +179,7 @@ private val S: Map<String, Array<String>> = mapOf(
     "err_timeout" to k("Timeout. The server is not responding.", "Délai dépassé. Le serveur ne répond pas.", "Tiempo agotado. El servidor no responde."),
     "err_ssl" to k("SSL error. Check your device date and time.", "Erreur SSL. Vérifiez la date et l'heure.", "Error SSL. Revisa la fecha y la hora."),
     "err_unreachable" to k("Server unreachable. {m}", "Serveur inaccessible. {m}", "Servidor inaccesible. {m}"),
+    "err_http" to k("Server refused the request (HTTP {m}).", "Le serveur a refusé la requête (HTTP {m}).", "El servidor rechazó la solicitud (HTTP {m})."),
     "err_no_data" to k("No data received.", "Aucune donnée reçue.", "No se recibieron datos."),
     "err_no_server" to k("No server available", "Aucun serveur disponible", "Ningún servidor disponible"),
     "err_upload" to k("Upload failed: {m}", "Échec de l'envoi : {m}", "Falló la subida: {m}"),
