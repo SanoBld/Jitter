@@ -19,6 +19,9 @@ class Store(ctx: Context) {
         linked = p.getBoolean("linked", true),
         fallback = p.getBoolean("fallback", true),
         autoSave = p.getBoolean("autoSave", true),
+        amoled = p.getBoolean("amoled", false),
+        haptic = p.getBoolean("haptic", true),
+        keepOn = p.getBoolean("keepOn", true),
         useGps = p.getBoolean("useGps", false),
         customName = p.getString("customName", "") ?: "",
         customUrl = p.getString("customUrl", "") ?: "",
@@ -30,6 +33,7 @@ class Store(ctx: Context) {
             .putString("serverUrl", s.serverUrl).putInt("unit", s.unit).putInt("conns", s.conns)
             .putInt("dlSecs", s.dlSecs).putInt("ulSecs", s.ulSecs).putBoolean("linked", s.linked)
             .putBoolean("fallback", s.fallback).putBoolean("autoSave", s.autoSave)
+            .putBoolean("amoled", s.amoled).putBoolean("haptic", s.haptic).putBoolean("keepOn", s.keepOn)
             .putBoolean("useGps", s.useGps).putString("customName", s.customName)
             .putString("customUrl", s.customUrl)
             .apply()

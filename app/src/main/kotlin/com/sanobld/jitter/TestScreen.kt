@@ -79,11 +79,19 @@ fun TestScreen(vm: JitterViewModel) {
     val c = MaterialTheme.colorScheme
 
     val view = LocalView.current
-    DisposableEffect(t.testing) {
-        view.keepScreenOn = t.testing
+    DisposableEffect(t.testing, s.keepOn) {
+        view.keepScreenOn = t.testing && s.keepOn
         onDispose { view.keepScreenOn = false }
     }
     LaunchedEffect(Unit) { vm.refreshNet() }
+    LaunchedEffect(t.phase) {
+        if (t.phase == Phase.DONE && s.haptic) {
+            view.performHapticFeedback(
+                if (android.os.Build.VERSION.SDK_INT >= 30) android.view.HapticFeedbackConstants.CONFIRM
+                else android.view.HapticFeedbackConstants.LONG_PRESS,
+            )
+        }
+    }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.widthIn(max = 600.dp).fillMaxHeight()) {

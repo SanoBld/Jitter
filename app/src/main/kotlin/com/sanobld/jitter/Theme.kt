@@ -96,11 +96,16 @@ fun JitterTheme(s: Settings, content: @Composable () -> Unit) {
         else -> isSystemInDarkTheme()
     }
     val ctx = LocalContext.current
-    val scheme = if (s.dynamic && Build.VERSION.SDK_INT >= 31) {
+    val base = if (s.dynamic && Build.VERSION.SDK_INT >= 31) {
         if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
     } else {
         seedScheme(Color(SEEDS[s.seed.coerceIn(0, SEEDS.size - 1)]), dark)
     }
+    val scheme = if (dark && s.amoled) base.copy(
+        background = Color.Black, surface = Color.Black, surfaceContainerLowest = Color.Black,
+        surfaceContainerLow = Color(0xFF0A0A0A), surfaceContainer = Color(0xFF111111),
+        surfaceContainerHigh = Color(0xFF171717), surfaceContainerHighest = Color(0xFF1E1E1E),
+    ) else base
     val view = LocalView.current
     SideEffect {
         (view.context as? Activity)?.window?.let { w ->

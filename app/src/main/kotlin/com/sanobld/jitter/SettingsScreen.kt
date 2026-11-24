@@ -37,6 +37,14 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.Vibration
+import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,14 +82,29 @@ fun SettingsScreen(vm: JitterViewModel) {
         if (r.values.any { it }) vm.setGps(true) else vm.toast("gps_denied")
     }
 
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    Scaffold(
+        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0),
+        topBar = {
+            LargeTopAppBar(
+                title = { Text(tr("settings")) },
+                scrollBehavior = scroll,
+                windowInsets = WindowInsets(0),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = c.surfaceContainer,
+                ),
+            )
+        },
+    ) { pad ->
+    Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier.widthIn(max = 720.dp).fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Text(tr("settings"), style = MaterialTheme.typography.headlineMedium)
-
             Section(tr("s_language")) {
                 ChoiceGroup(
                     LANGS.map { "${it.second} ${it.third}" },
@@ -97,6 +120,10 @@ fun SettingsScreen(vm: JitterViewModel) {
                     s.theme.coerceIn(0, 2),
                     { i -> vm.set { it.copy(theme = i) } },
                     Modifier.padding(12.dp),
+                )
+                SettingRow(
+                    tr("amoled"), tr("amoled_sub"), Icons.Rounded.DarkMode, 4,
+                    trailing = { JitterSwitch(s.amoled, { v -> vm.set { it.copy(amoled = v) } }) },
                 )
                 val canDyn = android.os.Build.VERSION.SDK_INT >= 31
                 SettingRow(
@@ -138,6 +165,14 @@ fun SettingsScreen(vm: JitterViewModel) {
                 SettingRow(
                     tr("auto_fallback"), tr("auto_fallback_sub"), Icons.Rounded.Tune, 0,
                     trailing = { JitterSwitch(s.fallback, { v -> vm.set { it.copy(fallback = v) } }) },
+                )
+                SettingRow(
+                    tr("haptic"), tr("haptic_sub"), Icons.Rounded.Vibration, 2,
+                    trailing = { JitterSwitch(s.haptic, { v -> vm.set { it.copy(haptic = v) } }) },
+                )
+                SettingRow(
+                    tr("keep_on"), tr("keep_on_sub"), Icons.Rounded.Smartphone, 3,
+                    trailing = { JitterSwitch(s.keepOn, { v -> vm.set { it.copy(keepOn = v) } }) },
                 )
                 SettingRow(
                     tr("auto_save"), tr("auto_save_sub"), Icons.Rounded.Save, 1,
@@ -198,6 +233,7 @@ fun SettingsScreen(vm: JitterViewModel) {
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
         }
+    }
     }
 
     if (sheet != 0) Pickers(vm, sheet) { sheet = 0 }

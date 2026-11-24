@@ -138,6 +138,10 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
             var ok = false
             for ((n, i) in order.withIndex()) {
                 try {
+                    if (s.fallback && order.size > 1) {
+                        upd { it.copy(phase = Phase.CHECKING) }
+                        SpeedService.reach(all[i].url)?.let { why -> throw AppError("err_unreachable", why) }
+                    }
                     runPhases(all[i], s)
                     ok = true
                     break
@@ -158,7 +162,7 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun friendly(e: Throwable): Msg = when (e) {
-        is AppError -> Msg(e.key)
+        is AppError -> Msg(e.key, e.detail)
         is UnknownHostException -> Msg("err_no_internet")
         is SocketTimeoutException -> Msg("err_timeout")
         is SSLException -> Msg("err_ssl")
@@ -188,7 +192,7 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
                 gauge = 0.0, points = emptyList(), dlPoints = emptyList(), warning = null, error = null, elapsed = 0,
             )
         }
-        val pr = SpeedService.ping(sv.url) ?: throw AppError("err_unreachable")
+        val pr = SpeedService.ping(sv.url)
         upd { it.copy(ping = pr.ping, jitter = pr.jitter, progress = 0.08f) }
 
         var dl = 0.0

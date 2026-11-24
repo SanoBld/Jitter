@@ -14,6 +14,12 @@ private fun k(en: String, fr: String, es: String) = arrayOf(en, fr, es)
 
 private val S: Map<String, Array<String>> = mapOf(
     "chart_title" to k("SPEED OVER TIME", "DÉBIT EN DIRECT", "VELOCIDAD EN VIVO"),
+    "amoled" to k("Pure black", "Noir pur", "Negro puro"),
+    "amoled_sub" to k("Saves battery on OLED screens in dark theme", "Économise la batterie sur écran OLED en thème sombre", "Ahorra batería en pantallas OLED con tema oscuro"),
+    "haptic" to k("Vibration when done", "Vibration à la fin", "Vibración al terminar"),
+    "haptic_sub" to k("A short buzz when the test finishes", "Un court retour haptique à la fin du test", "Una vibración breve al terminar la prueba"),
+    "keep_on" to k("Keep screen on", "Garder l'écran allumé", "Mantener pantalla encendida"),
+    "keep_on_sub" to k("While a test is running", "Pendant un test", "Durante una prueba"),
     "nav_test" to k("Test", "Test", "Test"),
     "nav_logs" to k("Logs", "Journaux", "Registros"),
     "nav_map" to k("Map", "Carte", "Mapa"),
@@ -172,7 +178,7 @@ private val S: Map<String, Array<String>> = mapOf(
     "err_no_internet" to k("No internet connection.", "Pas de connexion internet.", "Sin conexión a internet."),
     "err_timeout" to k("Timeout. The server is not responding.", "Délai dépassé. Le serveur ne répond pas.", "Tiempo agotado. El servidor no responde."),
     "err_ssl" to k("SSL error. Check your device date and time.", "Erreur SSL. Vérifiez la date et l'heure.", "Error SSL. Revisa la fecha y la hora."),
-    "err_unreachable" to k("Server unreachable.", "Serveur inaccessible.", "Servidor inaccesible."),
+    "err_unreachable" to k("Server unreachable. {m}", "Serveur inaccessible. {m}", "Servidor inaccesible. {m}"),
     "err_no_data" to k("No data received.", "Aucune donnée reçue.", "No se recibieron datos."),
     "err_no_server" to k("No server available", "Aucun serveur disponible", "Ningún servidor disponible"),
     "err_upload" to k("Upload failed: {m}", "Échec de l'envoi : {m}", "Falló la subida: {m}"),
@@ -196,7 +202,7 @@ object L {
         return r
     }
 
-    fun msg(m: Msg, lang: String): String = t(m.key, lang, "m" to m.m)
+    fun msg(m: Msg, lang: String): String = t(m.key, lang, "m" to m.m).trim()
 
     fun has(key: String) = S.containsKey(key)
     fun keys(): Set<String> = S.keys

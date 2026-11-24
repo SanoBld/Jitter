@@ -1,6 +1,14 @@
 package com.sanobld.jitter
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
+import okhttp3.Callback
+import okhttp3.Response
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -24,7 +32,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 
 /** An error whose text is a key of Strings.kt. */
-class AppError(val key: String) : IOException(key)
+class AppError(val key: String, val detail: String = "") : IOException(key)
 
 data class Sample(val instant: Double, val avg: Double, val progress: Float, val elapsed: Int)
 data class PingResult(val ping: Int, val jitter: Int)
@@ -71,24 +79,39 @@ object SpeedService {
     private fun pingUrlOf(url: String): String =
         if (url.contains("speed.cloudflare.com/__down")) "https://speed.cloudflare.com/__down?bytes=0" else url
 
-    /** Time to first byte in ms, or -1 on failure. */
-    private fun pingBlocking(url: String): Int {
+    /** Cancellable, non-blocking call: Stop works instantly. */
+    private suspend fun Call.await(): Response = suspendCancellableCoroutine { c ->
+        c.invokeOnCancellation { cancel() }
+        enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = c.resumeWithException(e)
+            override fun onResponse(call: Call, response: Response) = c.resume(response)
+        })
+    }
+
+    /** One timed request. Returns (ms, "") on success or (-1, reason) on failure. */
+    private suspend fun probe(url: String, timeoutMs: Long): Pair<Int, String> {
         val req = Request.Builder().url(pingUrlOf(url)).header("Range", "bytes=0-0").build()
         val t0 = System.nanoTime()
         return try {
-            pingClient.newCall(req).execute().use { r ->
-                val ms = ((System.nanoTime() - t0) / 1_000_000).toInt()
-                when (r.code) {
-                    200, 206, 416 -> ms
-                    else -> -1
+            withTimeout(timeoutMs) {
+                pingClient.newCall(req).await().use { r ->
+                    val ms = ((System.nanoTime() - t0) / 1_000_000).toInt()
+                    if (r.code == 200 || r.code == 206 || r.code == 416) ms to "" else -1 to "HTTP ${r.code}"
                 }
             }
+        } catch (e: TimeoutCancellationException) {
+            -1 to "timeout"
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            -1
+            -1 to (e.javaClass.simpleName + (e.message?.let { ": " + it.take(60) } ?: ""))
         }
     }
 
-    suspend fun pingOnce(url: String): Int = withContext(Dispatchers.IO) { pingBlocking(url) }
+    suspend fun pingOnce(url: String): Int = probe(url, 5000).first
+
+    /** null = reachable, otherwise the reason. */
+    suspend fun reach(url: String): String? = probe(url, 3000).let { if (it.first >= 0) null else it.second }
 
     /** Standard deviation of the samples, like the previous Flutter app. */
     fun jitterOf(v: List<Int>): Int {
@@ -97,21 +120,24 @@ object SpeedService {
         return sqrt(v.sumOf { (it - avg) * (it - avg) } / v.size).toInt()
     }
 
-    /** Idle ping: 1 warm-up request (DNS + TLS), then 4 measured ones. Gives up after 2 failures in a row. */
-    suspend fun ping(url: String): PingResult? = withContext(Dispatchers.IO) {
+    /** Idle ping: 1 warm-up request (DNS + TLS), then 4 measured. Fails after 2 errors in a row. */
+    suspend fun ping(url: String): PingResult {
         val v = ArrayList<Int>()
         var fails = 0
+        var reason = ""
         for (i in 0 until 5) {
-            val ms = pingBlocking(url)
+            val (ms, why) = probe(url, 5000)
             if (ms < 0) {
-                if (++fails >= 2) break
+                reason = why
+                if (++fails >= 2) throw AppError("err_unreachable", reason)
                 continue
             }
             fails = 0
             if (i > 0) v.add(ms)
             delay(100)
         }
-        if (v.isEmpty()) null else PingResult(v.average().toInt(), jitterOf(v))
+        if (v.isEmpty()) throw AppError("err_unreachable", reason)
+        return PingResult(v.average().toInt(), jitterOf(v))
     }
 
     private fun downloadWorker(url: String): Worker = { total, calls, active ->
