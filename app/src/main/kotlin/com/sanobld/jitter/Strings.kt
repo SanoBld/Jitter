@@ -20,6 +20,7 @@ private val S: Map<String, Array<String>> = mapOf(
     "haptic_sub" to k("A short buzz when the test finishes", "Un court retour haptique à la fin du test", "Una vibración breve al terminar la prueba"),
     "keep_on" to k("Keep screen on", "Garder l'écran allumé", "Mantener pantalla encendida"),
     "keep_on_sub" to k("While a test is running", "Pendant un test", "Durante una prueba"),
+    "check_servers" to k("Check servers", "Tester les serveurs", "Probar servidores"),
     "nav_test" to k("Test", "Test", "Test"),
     "nav_logs" to k("Logs", "Journaux", "Registros"),
     "nav_map" to k("Map", "Carte", "Mapa"),

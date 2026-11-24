@@ -93,8 +93,10 @@ object SpeedService {
     }
 
     /** One timed request. Returns (ms, "") on success or (-1, reason) on failure. */
-    private suspend fun probe(url: String, timeoutMs: Long): Pair<Int, String> {
-        val req = Request.Builder().url(pingUrlOf(url)).header("Range", "bytes=0-0").build()
+    private suspend fun probeOnce(url: String, timeoutMs: Long, plain: Boolean): Pair<Int, String> {
+        val b = Request.Builder().url(pingUrlOf(url))
+        if (plain) b.header("Connection", "close") else b.header("Range", "bytes=0-0")
+        val req = b.build()
         val t0 = System.nanoTime()
         return try {
             withTimeout(timeoutMs) {
@@ -111,6 +113,16 @@ object SpeedService {
             -1 to (e.javaClass.simpleName + (e.message?.let { ": " + it.take(60) } ?: ""))
         }
     }
+
+    /** Range request first; if the server drops it, retry once as a plain GET on a fresh connection. */
+    private suspend fun probe(url: String, timeoutMs: Long): Pair<Int, String> {
+        val first = probeOnce(url, timeoutMs, plain = false)
+        if (first.first >= 0 || first.second == "timeout" || first.second.startsWith("HTTP")) return first
+        return probeOnce(url, timeoutMs, plain = true)
+    }
+
+    /** Used by the "check servers" button. */
+    suspend fun check(url: String): Pair<Int, String> = probe(url, 5000)
 
     suspend fun pingOnce(url: String): Int = probe(url, 5000).first
 

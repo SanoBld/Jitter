@@ -1,5 +1,20 @@
 package com.sanobld.jitter
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
@@ -73,6 +88,28 @@ private fun ServerPicker(vm: JitterViewModel, s: Settings, onClose: () -> Unit) 
     val list = vm.servers(s)
     val cur = vm.currentServer(s)
     SheetTitle(tr("select_server"))
+    var res by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var running by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    TextButton(
+        enabled = !running,
+        modifier = Modifier.padding(horizontal = 16.dp),
+        onClick = {
+            scope.launch {
+                running = true
+                res = emptyMap()
+                for (chunk in list.chunked(6)) {
+                    chunk.map { sv ->
+                        async {
+                            val p = SpeedService.check(sv.url)
+                            sv.url to (if (p.first >= 0) "${p.first} ms" else "✗ " + p.second.take(24))
+                        }
+                    }.awaitAll().forEach { (u, t) -> res = res + (u to t) }
+                }
+                running = false
+            }
+        },
+    ) { Text(if (running) "…" else tr("check_servers")) }
     ListItem(
         headlineContent = { Text(tr("auto_fallback")) },
         supportingContent = { Text(tr("auto_fallback_sub")) },
@@ -90,7 +127,9 @@ private fun ServerPicker(vm: JitterViewModel, s: Settings, onClose: () -> Unit) 
                 headlineContent = { Text(sv.name) },
                 supportingContent = { Text("${sv.location} · ${sv.provider} · ${sv.size}") },
                 trailingContent = {
-                    if (sv.url == cur.url) Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary)
+                    val r = res[sv.url]
+                    if (r != null) Text(r, style = MaterialTheme.typography.labelMedium, color = if (r.startsWith("✗")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                    else if (sv.url == cur.url) Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary)
                     else if (sv.minConns >= 8) Text("${sv.minConns}×", style = MaterialTheme.typography.labelSmall)
                 },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
