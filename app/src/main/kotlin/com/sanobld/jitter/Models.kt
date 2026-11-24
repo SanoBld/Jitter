@@ -129,6 +129,7 @@ data class TestState(
     val progress: Float = 0f,
     val elapsed: Int = 0,
     val points: List<Double> = emptyList(),
+    val dlPoints: List<Double> = emptyList(),
     val error: Msg? = null,
     val warning: Msg? = null,
 )

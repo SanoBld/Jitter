@@ -86,8 +86,9 @@ fun TestScreen(vm: JitterViewModel) {
     LaunchedEffect(Unit) { vm.refreshNet() }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.widthIn(max = 600.dp).fillMaxHeight()) {
         Column(
-            Modifier.widthIn(max = 600.dp).fillMaxHeight().verticalScroll(rememberScrollState())
+            Modifier.weight(1f).verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -139,11 +140,23 @@ fun TestScreen(vm: JitterViewModel) {
 
             PhaseIndicator(t)
 
-            LiveChart(
-                t.points,
-                if (t.phase == Phase.UPLOAD) c.secondary else c.primary,
-                Modifier.fillMaxWidth().height(64.dp),
-            )
+            Surface(shape = MaterialTheme.shapes.extraLarge, color = c.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(tr("chart_title"), style = MaterialTheme.typography.labelLarge, color = c.primary)
+                        val top = (t.dlPoints + t.points).maxOrNull() ?: 0.0
+                        Text("max ${unit.fmt(top)} ${unit.label}", style = MaterialTheme.typography.labelMedium, color = c.onSurfaceVariant)
+                    }
+                    LiveChart(
+                        t.points,
+                        if (t.phase == Phase.UPLOAD) c.secondary else c.primary,
+                        Modifier.fillMaxWidth().height(140.dp).padding(top = 8.dp),
+                        ghost = t.dlPoints,
+                        ghostColor = c.primary.copy(alpha = 0.5f),
+                        grid = c.outlineVariant,
+                    )
+                }
+            }
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -204,6 +217,9 @@ fun TestScreen(vm: JitterViewModel) {
                 }
             }
 
+        }
+        Surface(color = c.surface, tonalElevation = 2.dp) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
             if (t.testing) {
                 Button(
                     onClick = { vm.stop() },
@@ -226,7 +242,8 @@ fun TestScreen(vm: JitterViewModel) {
                     Text(tr("start"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            }
+        }
         }
     }
     Pickers(vm, sheet) { sheet = 0 }

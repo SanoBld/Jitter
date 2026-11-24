@@ -10,6 +10,15 @@ android {
     namespace = "com.sanobld.jitter"
     compileSdk = 36
 
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("jitter.jks")
+            storePassword = "jitter123"
+            keyAlias = "jitter"
+            keyPassword = "jitter123"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.sanobld.jitter"
         minSdk = 26
@@ -23,7 +32,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("fixed")
         }
     }
 

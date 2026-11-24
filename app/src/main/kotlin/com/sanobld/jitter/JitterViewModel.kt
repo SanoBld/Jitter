@@ -185,7 +185,7 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
         upd {
             it.copy(
                 phase = Phase.PING, progress = 0.02f, dl = 0.0, ul = 0.0, ping = 0, jitter = 0,
-                gauge = 0.0, points = emptyList(), warning = null, error = null, elapsed = 0,
+                gauge = 0.0, points = emptyList(), dlPoints = emptyList(), warning = null, error = null, elapsed = 0,
             )
         }
         val pr = SpeedService.ping(sv.url) ?: throw AppError("err_unreachable")
@@ -201,19 +201,19 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
                     dl = x.avg
                     upd {
                         it.copy(
-                            gauge = x.instant, dl = x.avg, points = (it.points + x.instant).takeLast(80),
+                            gauge = x.instant, dl = x.avg, points = (it.points + x.instant).takeLast(120),
                             progress = 0.08f + 0.46f * x.progress, elapsed = x.elapsed,
                         )
                     }
                 }
 
-                upd { it.copy(phase = Phase.UPLOAD, points = emptyList(), gauge = 0.0, elapsed = 0, progress = 0.54f) }
+                upd { it.copy(phase = Phase.UPLOAD, dlPoints = it.points, points = emptyList(), gauge = 0.0, elapsed = 0, progress = 0.54f) }
                 try {
                     SpeedService.upload(s.ulSecs, conns).collect { x ->
                         ul = x.avg
                         upd {
                             it.copy(
-                                gauge = x.instant, ul = x.avg, points = (it.points + x.instant).takeLast(80),
+                                gauge = x.instant, ul = x.avg, points = (it.points + x.instant).takeLast(120),
                                 progress = 0.54f + 0.46f * x.progress, elapsed = x.elapsed,
                             )
                         }

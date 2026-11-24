@@ -196,31 +196,48 @@ fun SpeedGauge(mbps: Double, unit: SpeedUnit, grade: Grade?, serverLine: String,
 }
 
 @Composable
-fun LiveChart(points: List<Double>, color: Color, modifier: Modifier) {
+fun LiveChart(
+    points: List<Double>,
+    color: Color,
+    modifier: Modifier,
+    ghost: List<Double> = emptyList(),
+    ghostColor: Color = Color.Transparent,
+    grid: Color = Color.Gray,
+) {
     Canvas(modifier) {
-        if (points.size < 2) return@Canvas
-        val mx = max(points.max() * 1.2, 1.0)
         val w = size.width
         val h = size.height
-        fun pt(i: Int) = Offset(w * i / (points.size - 1), (h - points[i] / mx * h * 0.9 - h * 0.05).toFloat())
-        val line = Path().apply {
-            val p0 = pt(0)
-            moveTo(p0.x, p0.y)
-            for (i in 1 until points.size) {
-                val a = pt(i - 1)
-                val b = pt(i)
-                val mid = (a.x + b.x) / 2
-                cubicTo(mid, a.y, mid, b.y, b.x, b.y)
+        for (i in 0..3) {
+            val y = h * i / 3f
+            drawLine(grid.copy(alpha = 0.5f), Offset(0f, y), Offset(w, y), strokeWidth = 1.dp.toPx())
+        }
+        val mx = max(max(points.maxOrNull() ?: 0.0, ghost.maxOrNull() ?: 0.0) * 1.15, 1.0)
+        fun draw(list: List<Double>, col: Color, fillIt: Boolean) {
+            if (list.size < 2) return
+            fun pt(i: Int) = Offset(w * i / (list.size - 1), (h - list[i] / mx * h * 0.95 - h * 0.025).toFloat())
+            val line = Path().apply {
+                val p0 = pt(0)
+                moveTo(p0.x, p0.y)
+                for (i in 1 until list.size) {
+                    val a = pt(i - 1)
+                    val b = pt(i)
+                    val mid = (a.x + b.x) / 2
+                    cubicTo(mid, a.y, mid, b.y, b.x, b.y)
+                }
             }
+            if (fillIt) {
+                val fill = Path().apply {
+                    addPath(line)
+                    lineTo(w, h)
+                    lineTo(0f, h)
+                    close()
+                }
+                drawPath(fill, col.copy(alpha = 0.18f))
+            }
+            drawPath(line, col, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
-        val fill = Path().apply {
-            addPath(line)
-            lineTo(w, h)
-            lineTo(0f, h)
-            close()
-        }
-        drawPath(fill, color.copy(alpha = 0.18f))
-        drawPath(line, color, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        draw(ghost, ghostColor, false)
+        draw(points, color, true)
     }
 }
 

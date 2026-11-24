@@ -13,6 +13,7 @@ fun defaultLang(): String = Locale.getDefault().language.let { if (it == "fr" ||
 private fun k(en: String, fr: String, es: String) = arrayOf(en, fr, es)
 
 private val S: Map<String, Array<String>> = mapOf(
+    "chart_title" to k("SPEED OVER TIME", "DÉBIT EN DIRECT", "VELOCIDAD EN VIVO"),
     "nav_test" to k("Test", "Test", "Test"),
     "nav_logs" to k("Logs", "Journaux", "Registros"),
     "nav_map" to k("Map", "Carte", "Mapa"),
