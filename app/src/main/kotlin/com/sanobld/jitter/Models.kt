@@ -21,9 +21,9 @@ object Servers {
     val builtin = listOf(
         s("Cloudflare 1 GB", "Anycast, Global", "Cloudflare", "🌐", "https://speed.cloudflare.com/__down?bytes=1073741824", 8, "1 GB"),
         s("Cloudflare 100 MB", "Anycast, Global", "Cloudflare", "🌐", "https://speed.cloudflare.com/__down?bytes=104857600", 4, "100 MB"),
-        s("Strasbourg 10 GB", "Strasbourg, FR", "OVH", "🇫🇷", "https://proof.ovh.net/files/10Gb.dat", 16, "10 GB"),
-        s("Strasbourg 1 GB", "Strasbourg, FR", "OVH", "🇫🇷", "https://proof.ovh.net/files/1Gb.dat", 8, "1 GB"),
-        s("Paris 100 MB", "Paris, FR", "OVH", "🇫🇷", "https://proof.ovh.net/files/100Mb.dat", 4, "100 MB"),
+        s("OVH 10 GB", "France", "OVH", "🇫🇷", "https://proof.ovh.net/files/10Gb.dat", 16, "10 GB"),
+        s("OVH 1 GB", "France", "OVH", "🇫🇷", "https://proof.ovh.net/files/1Gb.dat", 8, "1 GB"),
+        s("OVH 100 MB", "France", "OVH", "🇫🇷", "https://proof.ovh.net/files/100Mb.dat", 4, "100 MB"),
         s("Falkenstein 10 GB", "Falkenstein, DE", "Hetzner", "🇩🇪", "https://fsn1-speed.hetzner.com/10GB.bin", 16, "10 GB"),
         s("Falkenstein 1 GB", "Falkenstein, DE", "Hetzner", "🇩🇪", "https://fsn1-speed.hetzner.com/1GB.bin", 8, "1 GB"),
         s("Falkenstein 100 MB", "Falkenstein, DE", "Hetzner", "🇩🇪", "https://fsn1-speed.hetzner.com/100MB.bin", 4, "100 MB"),
@@ -31,15 +31,6 @@ object Servers {
         s("Nuremberg 1 GB", "Nuremberg, DE", "Hetzner", "🇩🇪", "https://nbg1-speed.hetzner.com/1GB.bin", 8, "1 GB"),
         s("Helsinki 1 GB", "Helsinki, FI", "Hetzner", "🇫🇮", "https://hel1-speed.hetzner.com/1GB.bin", 8, "1 GB"),
         s("Ashburn 1 GB", "Ashburn, US", "Hetzner", "🇺🇸", "https://ash-speed.hetzner.com/1GB.bin", 8, "1 GB"),
-        s("Amsterdam", "Amsterdam, NL", "Leaseweb", "🇳🇱", "https://mirror.nl.leaseweb.net/speedtest/1000mb.bin", 8, "1 GB"),
-        s("Frankfurt", "Frankfurt, DE", "Leaseweb", "🇩🇪", "https://mirror.de.leaseweb.net/speedtest/1000mb.bin", 8, "1 GB"),
-        s("Ashburn", "Ashburn, US", "Leaseweb", "🇺🇸", "https://mirror.us.leaseweb.net/speedtest/100mb.bin", 4, "100 MB"),
-        s("Singapore", "Singapore, SG", "Leaseweb", "🇸🇬", "https://mirror.sg.leaseweb.net/speedtest/100mb.bin", 4, "100 MB"),
-        s("London", "London, UK", "Clouvider", "🇬🇧", "https://lon.speedtest.clouvider.net/1000MB.test", 8, "1 GB"),
-        s("Frankfurt", "Frankfurt, DE", "Clouvider", "🇩🇪", "https://fra.speedtest.clouvider.net/1000MB.test", 8, "1 GB"),
-        s("Amsterdam", "Amsterdam, NL", "Clouvider", "🇳🇱", "https://ams.speedtest.clouvider.net/1000MB.test", 8, "1 GB"),
-        s("New York", "New York, US", "Clouvider", "🇺🇸", "https://nyc.speedtest.clouvider.net/100MB.test", 4, "100 MB"),
-        s("Los Angeles", "Los Angeles, US", "Clouvider", "🇺🇸", "https://la.speedtest.clouvider.net/100MB.test", 4, "100 MB"),
     )
 }
 

@@ -234,9 +234,9 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        val finalPing = test.value.ping.takeIf { it > 0 } ?: pr.ping
-        val finalJitter = test.value.jitter
-        upd { it.copy(phase = Phase.DONE, testing = false, gauge = dl, ul = ul, progress = 1f) }
+        val finalPing = pr.ping
+        val finalJitter = pr.jitter
+        upd { it.copy(phase = Phase.DONE, testing = false, gauge = dl, ul = ul, ping = pr.ping, jitter = pr.jitter, progress = 1f) }
         if (s.autoSave) {
             val ts = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
             val useGps = s.useGps

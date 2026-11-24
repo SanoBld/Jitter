@@ -28,7 +28,9 @@ import java.io.IOException
 import java.util.Random
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 
@@ -70,6 +72,16 @@ object SpeedService {
         .build()
 
     /** Short timeouts so a dead server fails fast instead of blocking the test. */
+    /** Some servers (e.g. Hetzner) drop HTTP/1.1 requests; hosts that only work with HTTP/2 are remembered here. */
+    private val h2Hosts: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val h2Client: OkHttpClient = client.newBuilder()
+        .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
+        .connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).callTimeout(6, TimeUnit.SECONDS)
+        .build()
+    private val h2Download: OkHttpClient = client.newBuilder()
+        .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
+        .build()
+
     /** Last HTTP error code seen by a transfer worker (0 = none). */
     private val lastCode = AtomicInteger(0)
 
@@ -93,14 +105,14 @@ object SpeedService {
     }
 
     /** One timed request. Returns (ms, "") on success or (-1, reason) on failure. */
-    private suspend fun probeOnce(url: String, timeoutMs: Long, plain: Boolean): Pair<Int, String> {
+    private suspend fun probeOnce(url: String, timeoutMs: Long, plain: Boolean, h2: Boolean = false): Pair<Int, String> {
         val b = Request.Builder().url(pingUrlOf(url))
         if (plain) b.header("Connection", "close") else b.header("Range", "bytes=0-0")
         val req = b.build()
         val t0 = System.nanoTime()
         return try {
             withTimeout(timeoutMs) {
-                pingClient.newCall(req).await().use { r ->
+                (if (h2) h2Client else pingClient).newCall(req).await().use { r ->
                     val ms = ((System.nanoTime() - t0) / 1_000_000).toInt()
                     if (r.code == 200 || r.code == 206 || r.code == 416 || r.code == 429) ms to "" else -1 to "HTTP ${r.code}"
                 }
@@ -118,7 +130,11 @@ object SpeedService {
     private suspend fun probe(url: String, timeoutMs: Long): Pair<Int, String> {
         val first = probeOnce(url, timeoutMs, plain = false)
         if (first.first >= 0 || first.second == "timeout" || first.second.startsWith("HTTP")) return first
-        return probeOnce(url, timeoutMs, plain = true)
+        val second = probeOnce(url, timeoutMs, plain = true)
+        if (second.first >= 0 || second.second == "timeout" || second.second.startsWith("HTTP")) return second
+        val third = probeOnce(url, timeoutMs, plain = false, h2 = true)
+        if (third.first >= 0) runCatching { h2Hosts.add(pingUrlOf(url).toHttpUrl().host) }
+        return if (third.first >= 0) third else second
     }
 
     /** Used by the "check servers" button. */
@@ -160,7 +176,8 @@ object SpeedService {
         val buf = ByteArray(65536)
         while (active()) {
             try {
-                val call = client.newCall(Request.Builder().url(url).build())
+                val host = runCatching { url.toHttpUrl().host }.getOrDefault("")
+                val call = (if (host in h2Hosts) h2Download else client).newCall(Request.Builder().url(url).build())
                 calls.add(call)
                 call.execute().use { r ->
                     if (!r.isSuccessful) {
