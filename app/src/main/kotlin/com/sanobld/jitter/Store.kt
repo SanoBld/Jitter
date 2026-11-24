@@ -7,6 +7,7 @@ class Store(ctx: Context) {
     private val p = ctx.getSharedPreferences("jitter", Context.MODE_PRIVATE)
 
     fun load() = Settings(
+        lang = p.getString("lang", null) ?: defaultLang(),
         theme = p.getInt("theme", 0),
         dynamic = p.getBoolean("dynamic", true),
         seed = p.getInt("seed", 0),
@@ -25,7 +26,7 @@ class Store(ctx: Context) {
 
     fun save(s: Settings) {
         p.edit()
-            .putInt("theme", s.theme).putBoolean("dynamic", s.dynamic).putInt("seed", s.seed)
+            .putString("lang", s.lang).putInt("theme", s.theme).putBoolean("dynamic", s.dynamic).putInt("seed", s.seed)
             .putString("serverUrl", s.serverUrl).putInt("unit", s.unit).putInt("conns", s.conns)
             .putInt("dlSecs", s.dlSecs).putInt("ulSecs", s.ulSecs).putBoolean("linked", s.linked)
             .putBoolean("fallback", s.fallback).putBoolean("autoSave", s.autoSave)

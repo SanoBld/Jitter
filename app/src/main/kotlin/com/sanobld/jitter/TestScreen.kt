@@ -1,63 +1,66 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
-
 package com.sanobld.jitter
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Place
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Business
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.LocationOn
+import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.NetworkCheck
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SignalCellularAlt
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.Sensors
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlin.math.ln
-import kotlin.math.max
-
-private fun gaugeFrac(mbps: Double) = (ln(1 + mbps) / ln(2001.0)).toFloat().coerceIn(0f, 1f)
 
 @Composable
 fun TestScreen(vm: JitterViewModel) {
@@ -66,95 +69,180 @@ fun TestScreen(vm: JitterViewModel) {
     val ip by vm.ipLoc.collectAsStateWithLifecycle()
     val isp by vm.isp.collectAsStateWithLifecycle()
     val gps by vm.gpsCity.collectAsStateWithLifecycle()
+    val net by vm.net.collectAsStateWithLifecycle()
     val busy by vm.locBusy.collectAsStateWithLifecycle()
     var sheet by remember { mutableIntStateOf(0) }
-    val unit = SpeedUnit.entries[s.unit.coerceIn(0, SpeedUnit.entries.size - 1)]
+    val unit = unitOf(s)
     val server = vm.currentServer(s)
-    val where = if (s.useGps && gps.isNotEmpty()) gps else ip
+    val gpsActive = s.useGps && gps.isNotEmpty()
+    val where = if (gpsActive) gps else ip
+    val c = MaterialTheme.colorScheme
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AssistChip(
-                onClick = { vm.refreshLocation() },
-                label = { Text(if (busy) "Detecting…" else where.ifEmpty { "Unknown location" }) },
-                leadingIcon = { Icon(Icons.Filled.Place, null, Modifier.size(18.dp)) },
-            )
-            if (isp.isNotEmpty()) AssistChip(onClick = {}, label = { Text(isp) })
-            if (t.conn.isNotEmpty()) AssistChip(onClick = {}, label = { Text(t.conn) })
-        }
+    val view = LocalView.current
+    DisposableEffect(t.testing) {
+        view.keepScreenOn = t.testing
+        onDispose { view.keepScreenOn = false }
+    }
+    LaunchedEffect(Unit) { vm.refreshNet() }
 
-        t.error?.let { Banner(it, error = true) }
-        t.warning?.let { Banner(it, error = false) }
-
-        Gauge(t.gauge, unit, if (t.phase == Phase.DONE) gradeFor(t.dl) else null, server)
-        PhaseBar(t)
-        LiveChart(
-            t.points,
-            if (t.phase == Phase.UPLOAD) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
-            Modifier.fillMaxWidth().height(56.dp),
-        )
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatCard("↓ DOWN", unit.fmt(t.dl), unit.label, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-            StatCard("↑ UP", unit.fmt(t.ul), unit.label, MaterialTheme.colorScheme.secondary, Modifier.weight(1f))
-            StatCard("PING", "${t.ping}", "ms", MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
-            StatCard("JITTER", "${t.jitter}", "ms", MaterialTheme.colorScheme.error, Modifier.weight(1f))
-        }
-
-        if (!t.testing) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = { sheet = 1 }, label = { Text("${server.flag} ${server.name}") })
-                AssistChip(
-                    onClick = { sheet = 2 },
-                    label = { Text(if (s.linked) fmtDur(s.dlSecs) else "↓${fmtDur(s.dlSecs)} ↑${fmtDur(s.ulSecs)}") },
-                )
-                AssistChip(onClick = { sheet = 3 }, label = { Text(unit.label) })
-                AssistChip(onClick = { sheet = 4 }, label = { Text("${s.conns}× conns") })
-            }
-        }
-
-        if (t.testing) {
-            FilledTonalButton(
-                onClick = { vm.stop() },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                ),
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Column(
+            Modifier.widthIn(max = 600.dp).fillMaxHeight().verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(Icons.Filled.Close, null)
-                Spacer(Modifier.width(8.dp))
-                Text("STOP", fontWeight = FontWeight.Bold)
+                AssistChip(
+                    onClick = { vm.refreshLocation() },
+                    shape = MaterialTheme.shapes.large,
+                    label = { Text(if (busy) tr("detecting") else where.ifEmpty { tr("unknown_loc") }) },
+                    leadingIcon = { Icon(if (gpsActive) Icons.Rounded.MyLocation else Icons.Rounded.LocationOn, null, Modifier.size(18.dp)) },
+                )
+                if (isp.isNotEmpty()) {
+                    AssistChip(
+                        onClick = {}, shape = MaterialTheme.shapes.large, label = { Text(isp) },
+                        leadingIcon = { Icon(Icons.Rounded.Business, null, Modifier.size(18.dp)) },
+                    )
+                }
+                if (net.conn.isNotEmpty()) {
+                    val (label, icon) = when (net.conn) {
+                        "wifi" -> tr("conn_wifi") to Icons.Rounded.Wifi
+                        "mobile" -> tr("conn_mobile") to Icons.Rounded.SignalCellularAlt
+                        else -> tr("conn_eth") to Icons.Rounded.Lan
+                    }
+                    AssistChip(
+                        onClick = {}, shape = MaterialTheme.shapes.large, label = { Text(label) },
+                        leadingIcon = { Icon(icon, null, Modifier.size(18.dp)) },
+                    )
+                }
+                if (net.localIp.isNotEmpty()) {
+                    AssistChip(
+                        onClick = {}, shape = MaterialTheme.shapes.large, label = { Text(net.localIp) },
+                        leadingIcon = { Icon(Icons.Rounded.Devices, null, Modifier.size(18.dp)) },
+                    )
+                }
             }
-        } else {
-            Button(onClick = { vm.start() }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                Icon(Icons.Filled.PlayArrow, null)
-                Spacer(Modifier.width(8.dp))
-                Text("START TEST", fontWeight = FontWeight.Bold)
+
+            t.error?.let { Banner(tr(it), error = true) }
+            t.warning?.let { Banner(tr(it), error = false) }
+
+            SpeedGauge(
+                mbps = t.gauge,
+                unit = unit,
+                grade = if (t.phase == Phase.DONE) gradeFor(t.dl) else null,
+                serverLine = "${server.flag} ${server.location}",
+            )
+
+            PhaseIndicator(t)
+
+            LiveChart(
+                t.points,
+                if (t.phase == Phase.UPLOAD) c.secondary else c.primary,
+                Modifier.fillMaxWidth().height(64.dp),
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatCard(
+                        0, Icons.Rounded.ArrowDownward, tr("down"), unit.fmt(t.dl), unit.label,
+                        c.primaryContainer, c.onPrimaryContainer, c.primary, c.onPrimary,
+                        RoundedCornerShape(topStart = 44.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp),
+                        Modifier.weight(1f),
+                    )
+                    StatCard(
+                        1, Icons.Rounded.ArrowUpward, tr("up"), unit.fmt(t.ul), unit.label,
+                        c.secondaryContainer, c.onSecondaryContainer, c.secondary, c.onSecondary,
+                        RoundedCornerShape(topStart = 16.dp, topEnd = 44.dp, bottomEnd = 16.dp, bottomStart = 16.dp),
+                        Modifier.weight(1f),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatCard(
+                        2, Icons.Rounded.NetworkCheck, tr("ping"), "${t.ping}", "ms",
+                        c.tertiaryContainer, c.onTertiaryContainer, c.tertiary, c.onTertiary,
+                        RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 44.dp),
+                        Modifier.weight(1f),
+                    )
+                    StatCard(
+                        3, Icons.Rounded.Sensors, tr("jitter"), "${t.jitter}", "ms",
+                        c.surfaceContainerHigh, c.onSurface, c.error, c.onError,
+                        RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 44.dp, bottomStart = 16.dp),
+                        Modifier.weight(1f),
+                    )
+                }
             }
+
+            if (!t.testing) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    AssistChip(
+                        onClick = { sheet = 1 }, shape = MaterialTheme.shapes.large,
+                        label = { Text("${server.flag} ${server.name}") },
+                        leadingIcon = { Icon(Icons.Rounded.Dns, null, Modifier.size(18.dp)) },
+                    )
+                    AssistChip(
+                        onClick = { sheet = 2 }, shape = MaterialTheme.shapes.large,
+                        label = { Text(if (s.linked) fmtDur(s.dlSecs) else "↓${fmtDur(s.dlSecs)} ↑${fmtDur(s.ulSecs)}") },
+                        leadingIcon = { Icon(Icons.Rounded.Timer, null, Modifier.size(18.dp)) },
+                    )
+                    AssistChip(
+                        onClick = { sheet = 3 }, shape = MaterialTheme.shapes.large,
+                        label = { Text(unit.label) },
+                        leadingIcon = { Icon(Icons.Rounded.Speed, null, Modifier.size(18.dp)) },
+                    )
+                    AssistChip(
+                        onClick = { sheet = 4 }, shape = MaterialTheme.shapes.large,
+                        label = { Text(if (s.conns <= 0) tr("auto") else "${s.conns}×") },
+                        leadingIcon = { Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp)) },
+                    )
+                }
+            }
+
+            if (t.testing) {
+                Button(
+                    onClick = { vm.stop() },
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = c.errorContainer, contentColor = c.onErrorContainer),
+                ) {
+                    Icon(Icons.Rounded.Close, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(tr("stop"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Button(
+                    onClick = { vm.start() },
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(tr("start"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
         }
     }
     Pickers(vm, sheet) { sheet = 0 }
 }
 
-fun fmtDur(s: Int) = if (s == 0) "∞" else if (s >= 60) "${s / 60}m" else "${s}s"
-
 @Composable
 private fun Banner(text: String, error: Boolean) {
     val c = MaterialTheme.colorScheme
-    Card(
+    Surface(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (error) c.errorContainer else c.tertiaryContainer,
-            contentColor = if (error) c.onErrorContainer else c.onTertiaryContainer,
-        ),
+        shape = MaterialTheme.shapes.large,
+        color = if (error) c.errorContainer else c.tertiaryContainer,
+        contentColor = if (error) c.onErrorContainer else c.onTertiaryContainer,
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Warning, null, Modifier.size(20.dp))
+            Icon(Icons.Rounded.Warning, null, Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
             Text(text, style = MaterialTheme.typography.bodyMedium)
         }
@@ -162,99 +250,69 @@ private fun Banner(text: String, error: Boolean) {
 }
 
 @Composable
-private fun Gauge(mbps: Double, unit: SpeedUnit, grade: Grade?, server: SpeedServer) {
-    val frac by animateFloatAsState(gaugeFrac(mbps), tween(350), label = "gauge")
-    val track = MaterialTheme.colorScheme.surfaceContainerHighest
-    val color = MaterialTheme.colorScheme.primary
-    Box(Modifier.size(260.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val sw = 18.dp.toPx()
-            val inset = sw / 2 + 4.dp.toPx()
-            val topLeft = Offset(inset, inset)
-            val sz = Size(size.width - 2 * inset, size.height - 2 * inset)
-            drawArc(track, 150f, 240f, false, topLeft, sz, style = Stroke(sw, cap = StrokeCap.Round))
-            if (frac > 0.003f) {
-                drawArc(color, 150f, 240f * frac, false, topLeft, sz, style = Stroke(sw, cap = StrokeCap.Round))
+private fun PhaseIndicator(t: TestState) {
+    val c = MaterialTheme.colorScheme
+    val live = t.phase == Phase.DOWNLOAD || t.phase == Phase.UPLOAD
+    val working = t.testing && !live
+    val step = when (t.phase) {
+        Phase.PING -> 0
+        Phase.DOWNLOAD -> 1
+        Phase.UPLOAD -> 2
+        Phase.DONE -> 3
+        else -> -1
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LinearWavyProgressIndicator(progress = { t.progress }, modifier = Modifier.fillMaxWidth())
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf("phase_ping", "phase_download", "phase_upload").forEachIndexed { i, key ->
+                val active = step == i
+                val done = step > i
+                Text(
+                    tr(key),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (active || done) FontWeight.ExtraBold else FontWeight.Medium,
+                    color = if (active) c.primary else if (done) c.onSurface else c.onSurfaceVariant.copy(alpha = 0.6f),
+                )
             }
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(unit.fmt(mbps), style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold)
-            Text(unit.label, style = MaterialTheme.typography.titleMedium, color = color)
-            Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            if (working) {
+                LoadingIndicator(Modifier.size(32.dp))
+                Spacer(Modifier.width(8.dp))
+            }
+            val time = "%02d:%02d".format(t.elapsed / 60, t.elapsed % 60)
             Text(
-                "${server.flag} ${server.location}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
+                if (live) "${tr(t.phase.key)}  $time" else tr(t.phase.key),
+                style = MaterialTheme.typography.labelLarge,
+                color = c.onSurfaceVariant,
             )
-            if (grade != null) {
-                Spacer(Modifier.height(6.dp))
-                Text(grade.label, color = grade.color, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+@Composable
+private fun StatCard(
+    kind: Int,
+    icon: ImageVector,
+    label: String,
+    value: String,
+    unit: String,
+    container: Color,
+    onContainer: Color,
+    badge: Color,
+    onBadge: Color,
+    shape: Shape,
+    modifier: Modifier,
+) {
+    Surface(modifier, shape = shape, color = container, contentColor = onContainer) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ShapeBadge(kind, icon, badge, onBadge, 36.dp)
+                Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             }
-        }
-    }
-}
-
-@Composable
-private fun PhaseBar(t: TestState) {
-    val dlDone = t.phase == Phase.UPLOAD || t.phase == Phase.DONE
-    val pingDone = dlDone || t.phase == Phase.DOWNLOAD
-    val pingP = if (pingDone) 1f else if (t.phase == Phase.PING) 0.5f else 0f
-    val dlP = if (dlDone) 1f else if (t.phase == Phase.DOWNLOAD) ((t.progress - 0.08f) / 0.46f).coerceIn(0f, 1f) else 0f
-    val ulP = if (t.phase == Phase.DONE) 1f else if (t.phase == Phase.UPLOAD) ((t.progress - 0.54f) / 0.46f).coerceIn(0f, 1f) else 0f
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            LinearProgressIndicator({ pingP }, Modifier.weight(1f).height(6.dp), color = MaterialTheme.colorScheme.tertiary, strokeCap = StrokeCap.Round)
-            LinearProgressIndicator({ dlP }, Modifier.weight(5f).height(6.dp), color = MaterialTheme.colorScheme.primary, strokeCap = StrokeCap.Round)
-            LinearProgressIndicator({ ulP }, Modifier.weight(5f).height(6.dp), color = MaterialTheme.colorScheme.secondary, strokeCap = StrokeCap.Round)
-        }
-        val live = t.phase == Phase.DOWNLOAD || t.phase == Phase.UPLOAD
-        val time = "%02d:%02d".format(t.elapsed / 60, t.elapsed % 60)
-        Text(
-            if (live) "${t.phase.label}  $time" else t.phase.label,
-            Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-fun LiveChart(points: List<Double>, color: Color, modifier: Modifier) {
-    Canvas(modifier) {
-        if (points.size < 2) return@Canvas
-        val mx = max(points.max() * 1.2, 1.0)
-        val w = size.width
-        val h = size.height
-        fun pt(i: Int) = Offset(w * i / (points.size - 1), (h - points[i] / mx * h * 0.9 - h * 0.05).toFloat())
-        val line = Path().apply {
-            moveTo(pt(0).x, pt(0).y)
-            for (i in 1 until points.size) lineTo(pt(i).x, pt(i).y)
-        }
-        val fill = Path().apply {
-            addPath(line)
-            lineTo(w, h)
-            lineTo(0f, h)
-            close()
-        }
-        drawPath(fill, color.copy(alpha = 0.18f))
-        drawPath(line, color, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-    }
-}
-
-@Composable
-private fun StatCard(label: String, value: String, unit: String, color: Color, modifier: Modifier) {
-    Card(
-        modifier,
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-    ) {
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 12.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-            Text(unit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+            Text(value, style = MaterialTheme.typography.headlineMedium, maxLines = 1)
+            Text(unit, style = MaterialTheme.typography.labelMedium, color = onContainer.copy(alpha = 0.7f))
         }
     }
 }

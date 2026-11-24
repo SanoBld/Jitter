@@ -21,7 +21,10 @@ import java.util.Random
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.math.abs
+import kotlin.math.sqrt
+
+/** An error whose text is a key of Strings.kt. */
+class AppError(val key: String) : IOException(key)
 
 data class Sample(val instant: Double, val avg: Double, val progress: Float, val elapsed: Int)
 data class PingResult(val ping: Int, val jitter: Int)
@@ -54,22 +57,23 @@ object SpeedService {
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
-        .connectionPool(ConnectionPool(64, 1, TimeUnit.MINUTES))
+        .connectionPool(ConnectionPool(96, 1, TimeUnit.MINUTES))
         .build()
 
-    private fun pingOnce(url: String): Int {
+    /** Time to first byte in ms, or -1 on failure. */
+    private fun pingBlocking(url: String): Int {
         val req = Request.Builder().url(url).header("Range", "bytes=0-0").build()
         val t0 = System.nanoTime()
         return try {
             client.newCall(req).execute().use { r ->
                 val ms = ((System.nanoTime() - t0) / 1_000_000).toInt()
-                if (r.code == 206) {
-                    r.body?.bytes()
-                    ms
-                } else if (r.code == 200) {
-                    ms
-                } else {
-                    -1
+                when (r.code) {
+                    206 -> {
+                        r.body?.bytes()
+                        ms
+                    }
+                    200 -> ms
+                    else -> -1
                 }
             }
         } catch (e: IOException) {
@@ -77,21 +81,24 @@ object SpeedService {
         }
     }
 
+    suspend fun pingOnce(url: String): Int = withContext(Dispatchers.IO) { pingBlocking(url) }
+
+    /** Standard deviation of the samples, like the previous Flutter app. */
+    fun jitterOf(v: List<Int>): Int {
+        if (v.size < 2) return 0
+        val avg = v.average()
+        return sqrt(v.sumOf { (it - avg) * (it - avg) } / v.size).toInt()
+    }
+
+    /** Idle ping: 1 warm-up request (DNS + TLS), then 5 measured ones. */
     suspend fun ping(url: String): PingResult? = withContext(Dispatchers.IO) {
         val v = ArrayList<Int>()
         for (i in 0 until 6) {
-            val ms = pingOnce(url)
+            val ms = pingBlocking(url)
             if (i > 0 && ms >= 0) v.add(ms)
             delay(150)
         }
-        if (v.isEmpty()) {
-            null
-        } else {
-            var diff = 0.0
-            for (i in 1 until v.size) diff += abs(v[i] - v[i - 1])
-            val jitter = if (v.size > 1) diff / (v.size - 1) else 0.0
-            PingResult(v.average().toInt(), jitter.toInt())
-        }
+        if (v.isEmpty()) null else PingResult(v.average().toInt(), jitterOf(v))
     }
 
     private fun downloadWorker(url: String): Worker = { total, calls, active ->
@@ -159,7 +166,7 @@ object SpeedService {
             delay(250)
             val ms = (System.nanoTime() - t0) / 1_000_000
             val b = total.get()
-            if (ms > 6000 && b == 0L) throw IOException("No data received")
+            if (ms > 6000 && b == 0L) throw AppError("err_no_data")
             hist.addLast(ms to b)
             while (hist.size > 1 && ms - hist.first().first > 1000) hist.removeFirst()
             val (m0, b0) = hist.first()

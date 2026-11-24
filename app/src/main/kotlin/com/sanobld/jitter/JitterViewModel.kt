@@ -5,10 +5,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import java.io.IOException
+import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.text.SimpleDateFormat
@@ -21,19 +23,22 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
     val settings = MutableStateFlow(store.load())
     val history = MutableStateFlow(store.loadHistory())
     val test = MutableStateFlow(TestState())
+    val net = MutableStateFlow(NetInfo())
     val ipLoc = MutableStateFlow("")
     val isp = MutableStateFlow("")
     val gpsCity = MutableStateFlow("")
+    val gpsLat = MutableStateFlow<Double?>(null)
+    val gpsLng = MutableStateFlow<Double?>(null)
     val locBusy = MutableStateFlow(false)
-    val message = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val message = MutableSharedFlow<Msg>(extraBufferCapacity = 4)
     private var job: Job? = null
 
     init {
         refreshLocation()
     }
 
-    fun toast(msg: String) {
-        message.tryEmit(msg)
+    fun toast(key: String, m: String = "") {
+        message.tryEmit(Msg(key, m))
     }
 
     fun set(f: (Settings) -> Settings) {
@@ -60,18 +65,59 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
     fun currentServer(s: Settings = settings.value): SpeedServer =
         servers(s).firstOrNull { it.url == s.serverUrl } ?: servers(s).first()
 
+    fun saveCustomServer(name: String, url: String): Boolean {
+        val u = url.trim()
+        if (!(u.startsWith("http://") || u.startsWith("https://"))) {
+            toast("srv_bad_url")
+            return false
+        }
+        set { it.copy(customName = name.trim(), customUrl = u, serverUrl = u) }
+        toast("srv_saved")
+        return true
+    }
+
+    fun removeCustomServer() {
+        set { it.copy(customName = "", customUrl = "", serverUrl = "") }
+        toast("srv_removed")
+    }
+
     val activeLoc: String
         get() = if (settings.value.useGps && gpsCity.value.isNotEmpty()) gpsCity.value else ipLoc.value
 
+    fun refreshNet() {
+        net.value = Net.netInfo(getApplication<Application>())
+    }
+
     fun refreshLocation() {
+        refreshNet()
         viewModelScope.launch {
             locBusy.value = true
             Net.ipInfo()?.let {
                 ipLoc.value = it.location
                 isp.value = it.isp
             }
-            if (settings.value.useGps) Net.gpsCity(getApplication<Application>())?.let { gpsCity.value = it }
+            if (settings.value.useGps) refreshGps()
             locBusy.value = false
+        }
+    }
+
+    fun setGps(on: Boolean) {
+        set { it.copy(useGps = on) }
+        if (on) viewModelScope.launch {
+            locBusy.value = true
+            refreshGps()
+            locBusy.value = false
+        }
+    }
+
+    private suspend fun refreshGps() {
+        val fix = Net.gps(getApplication<Application>())
+        if (fix == null) {
+            toast("gps_unavail")
+        } else {
+            if (fix.city.isNotEmpty()) gpsCity.value = fix.city
+            gpsLat.value = fix.lat
+            gpsLng.value = fix.lng
         }
     }
 
@@ -86,8 +132,9 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
             val all = servers(s)
             val first = all.indexOfFirst { it.url == s.serverUrl }.coerceAtLeast(0)
             val order = all.indices.map { (first + it) % all.size }.let { if (s.fallback) it.take(4) else it.take(1) }
-            test.value = TestState(testing = true, phase = Phase.CHECKING, conn = Net.connType(getApplication<Application>()))
-            var err = "No server available"
+            refreshNet()
+            test.value = TestState(testing = true, phase = Phase.CHECKING)
+            var err = Msg("err_no_server")
             var ok = false
             for ((n, i) in order.withIndex()) {
                 try {
@@ -110,57 +157,89 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
         upd { it.copy(testing = false, phase = Phase.STOPPED, progress = 0f) }
     }
 
-    private fun friendly(e: Throwable): String = when (e) {
-        is UnknownHostException -> "No internet connection."
-        is SocketTimeoutException -> "Timeout. The server is not responding."
-        is SSLException -> "SSL error. Check your device date and time."
-        else -> e.message ?: "Unknown error"
+    private fun friendly(e: Throwable): Msg = when (e) {
+        is AppError -> Msg(e.key)
+        is UnknownHostException -> Msg("err_no_internet")
+        is SocketTimeoutException -> Msg("err_timeout")
+        is SSLException -> Msg("err_ssl")
+        is ConnectException -> Msg("err_unreachable")
+        else -> e.message?.let { Msg("err_raw", it) } ?: Msg("err_unknown")
+    }
+
+    /** Ping every 2 s while the speed phases run, like the old app: shows latency under load. */
+    private suspend fun backgroundPing(url: String) {
+        val hist = ArrayList<Int>()
+        while (true) {
+            delay(2000)
+            val ms = SpeedService.pingOnce(url)
+            if (ms >= 0) {
+                hist.add(ms)
+                if (hist.size > 20) hist.removeAt(0)
+                upd { it.copy(ping = ms, jitter = if (hist.size >= 3) SpeedService.jitterOf(hist) else it.jitter) }
+            }
+        }
     }
 
     private suspend fun runPhases(sv: SpeedServer, s: Settings) {
-        val conns = s.conns.coerceIn(1, 32)
+        val conns = s.effectiveConns
         upd {
             it.copy(
                 phase = Phase.PING, progress = 0.02f, dl = 0.0, ul = 0.0, ping = 0, jitter = 0,
                 gauge = 0.0, points = emptyList(), warning = null, error = null, elapsed = 0,
             )
         }
-        val pr = SpeedService.ping(sv.url) ?: throw IOException("Server unreachable")
+        val pr = SpeedService.ping(sv.url) ?: throw AppError("err_unreachable")
         upd { it.copy(ping = pr.ping, jitter = pr.jitter, progress = 0.08f) }
 
-        upd { it.copy(phase = Phase.DOWNLOAD, points = emptyList(), gauge = 0.0, elapsed = 0) }
         var dl = 0.0
-        SpeedService.download(sv.url, s.dlSecs, conns).collect { x ->
-            dl = x.avg
-            upd {
-                it.copy(
-                    gauge = x.instant, dl = x.avg, points = (it.points + x.instant).takeLast(80),
-                    progress = 0.08f + 0.46f * x.progress, elapsed = x.elapsed,
-                )
-            }
-        }
-
-        upd { it.copy(phase = Phase.UPLOAD, points = emptyList(), gauge = 0.0, elapsed = 0, progress = 0.54f) }
         var ul = 0.0
-        try {
-            SpeedService.upload(s.ulSecs, conns).collect { x ->
-                ul = x.avg
-                upd {
-                    it.copy(
-                        gauge = x.instant, ul = x.avg, points = (it.points + x.instant).takeLast(80),
-                        progress = 0.54f + 0.46f * x.progress, elapsed = x.elapsed,
-                    )
+        coroutineScope {
+            val bg = launch { backgroundPing(sv.url) }
+            try {
+                upd { it.copy(phase = Phase.DOWNLOAD, points = emptyList(), gauge = 0.0, elapsed = 0) }
+                SpeedService.download(sv.url, s.dlSecs, conns).collect { x ->
+                    dl = x.avg
+                    upd {
+                        it.copy(
+                            gauge = x.instant, dl = x.avg, points = (it.points + x.instant).takeLast(80),
+                            progress = 0.08f + 0.46f * x.progress, elapsed = x.elapsed,
+                        )
+                    }
                 }
+
+                upd { it.copy(phase = Phase.UPLOAD, points = emptyList(), gauge = 0.0, elapsed = 0, progress = 0.54f) }
+                try {
+                    SpeedService.upload(s.ulSecs, conns).collect { x ->
+                        ul = x.avg
+                        upd {
+                            it.copy(
+                                gauge = x.instant, ul = x.avg, points = (it.points + x.instant).takeLast(80),
+                                progress = 0.54f + 0.46f * x.progress, elapsed = x.elapsed,
+                            )
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ul = 0.0
+                    val m = friendly(e)
+                    upd { it.copy(ul = 0.0, warning = Msg("err_upload", L.msg(m, settings.value.lang))) }
+                }
+            } finally {
+                bg.cancel()
             }
-        } catch (e: IOException) {
-            ul = 0.0
-            upd { it.copy(ul = 0.0, warning = "Upload failed: ${friendly(e)}") }
         }
 
+        val finalPing = test.value.ping.takeIf { it > 0 } ?: pr.ping
+        val finalJitter = test.value.jitter
         upd { it.copy(phase = Phase.DONE, testing = false, gauge = dl, ul = ul, progress = 1f) }
         if (s.autoSave) {
             val ts = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
-            val e = Entry(ts, sv.flag, sv.name, sv.provider, sv.location, activeLoc, dl, ul, pr.ping, pr.jitter)
+            val useGps = s.useGps
+            val e = Entry(
+                ts, sv.flag, sv.name, sv.provider, sv.location, activeLoc, dl, ul, finalPing, finalJitter,
+                if (useGps) gpsLat.value else null, if (useGps) gpsLng.value else null,
+            )
             history.value = listOf(e) + history.value.take(499)
             store.saveHistory(history.value)
         }
@@ -178,11 +257,12 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
 
     fun exportCsv(): String = Csv.build(history.value)
 
+    /** @return number of new entries added. */
     fun importCsv(text: String): Int {
         val seen = history.value.map { it.ts + "|" + it.server }.toMutableSet()
         val added = Csv.parse(text).filter { seen.add(it.ts + "|" + it.server) }
         if (added.isNotEmpty()) {
-            history.value = (history.value + added).sortedByDescending { it.ts }
+            history.value = (history.value + added).sortedByDescending { it.ts }.take(500)
             store.saveHistory(history.value)
         }
         return added.size

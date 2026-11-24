@@ -3,8 +3,11 @@ package com.sanobld.jitter
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -16,11 +19,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.WindowCompat
 
 private fun tone(h: Float, s: Float, l: Float) = Color(ColorUtils.HSLToColor(floatArrayOf(h, s, l)))
 
+/** Fallback palette (Android < 12 or dynamic color off), derived from one of the 7 accent seeds. */
 private fun seedScheme(seed: Color, dark: Boolean): ColorScheme {
     val hsl = FloatArray(3)
     ColorUtils.colorToHSL(seed.toArgb(), hsl)
@@ -57,6 +64,30 @@ private fun seedScheme(seed: Color, dark: Boolean): ColorScheme {
     )
 }
 
+/** Material 3 Expressive uses rounder corners than the baseline scale. */
+private val ExpressiveShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(32.dp),
+)
+
+private val base = Typography()
+
+/** Heavier, tighter display/headline/title styles for an editorial Expressive look. */
+private val ExpressiveTypography = Typography(
+    displayLarge = base.displayLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-1).sp),
+    displayMedium = base.displayMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
+    displaySmall = base.displaySmall.copy(fontWeight = FontWeight.Bold),
+    headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold),
+    headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold),
+    headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold),
+    titleLarge = base.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+    titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+    labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+)
+
 @Composable
 fun JitterTheme(s: Settings, content: @Composable () -> Unit) {
     val dark = when (s.theme) {
@@ -78,5 +109,18 @@ fun JitterTheme(s: Settings, content: @Composable () -> Unit) {
             c.isAppearanceLightNavigationBars = !dark
         }
     }
-    MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+    MaterialExpressiveTheme(
+        colorScheme = scheme,
+        motionScheme = MotionScheme.expressive(),
+        shapes = ExpressiveShapes,
+        typography = ExpressiveTypography,
+        content = content,
+    )
+}
+
+@Composable
+fun isDarkTheme(s: Settings): Boolean = when (s.theme) {
+    1 -> false
+    2 -> true
+    else -> isSystemInDarkTheme()
 }

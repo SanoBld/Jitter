@@ -1,5 +1,3 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
-
 package com.sanobld.jitter
 
 import android.os.Bundle
@@ -10,18 +8,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,41 +37,46 @@ class MainActivity : ComponentActivity() {
         setContent {
             val vm: JitterViewModel = viewModel()
             val s by vm.settings.collectAsStateWithLifecycle()
-            JitterTheme(s) { AppRoot(vm) }
+            CompositionLocalProvider(LocalLang provides s.lang) {
+                JitterTheme(s) { AppRoot(vm, s) }
+            }
         }
     }
 }
 
 @Composable
-fun AppRoot(vm: JitterViewModel) {
+fun AppRoot(vm: JitterViewModel, s: Settings) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val snack = remember { SnackbarHostState() }
-    LaunchedEffect(Unit) { vm.message.collect { snack.showSnackbar(it) } }
+    LaunchedEffect(s.lang) {
+        vm.message.collect { snack.showSnackbar(L.msg(it, s.lang)) }
+    }
     val items = listOf(
-        "Test" to Icons.Filled.Home,
-        "Logs" to Icons.AutoMirrored.Filled.List,
-        "Settings" to Icons.Filled.Settings,
+        "nav_test" to Icons.Rounded.Speed,
+        "nav_logs" to Icons.Rounded.History,
+        "nav_map" to Icons.Rounded.Map,
+        "nav_settings" to Icons.Rounded.Settings,
     )
-    Scaffold(
-        snackbarHost = { SnackbarHost(snack) },
-        bottomBar = {
-            NavigationBar {
-                items.forEachIndexed { i, (label, icon) ->
-                    NavigationBarItem(
-                        selected = tab == i,
-                        onClick = { tab = i },
-                        icon = { Icon(icon, label) },
-                        label = { Text(label) },
-                    )
-                }
+    NavigationSuiteScaffold(
+        navigationSuiteItems = {
+            items.forEachIndexed { i, (key, icon) ->
+                item(
+                    selected = tab == i,
+                    onClick = { tab = i },
+                    icon = { Icon(icon, null) },
+                    label = { Text(tr(key)) },
+                )
             }
         },
-    ) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize()) {
-            when (tab) {
-                0 -> TestScreen(vm)
-                1 -> HistoryScreen(vm)
-                else -> SettingsScreen(vm)
+    ) {
+        Scaffold(snackbarHost = { SnackbarHost(snack) }) { pad ->
+            Box(Modifier.padding(pad).fillMaxSize()) {
+                when (tab) {
+                    0 -> TestScreen(vm)
+                    1 -> HistoryScreen(vm, isDarkTheme(s))
+                    2 -> MapScreen(vm, isDarkTheme(s))
+                    else -> SettingsScreen(vm)
+                }
             }
         }
     }

@@ -17,16 +17,18 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Request
 import org.json.JSONObject
+import java.net.Inet4Address
 import kotlin.coroutines.resume
 
 data class IpInfo(val location: String, val isp: String)
+data class GpsFix(val city: String, val lat: Double, val lng: Double)
 
 object Net {
     private fun join(a: String, b: String) =
         listOf(a, b).filter { it.isNotEmpty() && it != "null" }.joinToString(", ")
 
     private fun <T> fetch(url: String, parse: (JSONObject) -> T?): T? = try {
-        val req = Request.Builder().url(url).header("User-Agent", "JitterApp/1.0").build()
+        val req = Request.Builder().url(url).header("User-Agent", "JitterApp/2.0 (speed-test)").build()
         SpeedService.client.newCall(req).execute().use { r ->
             if (r.isSuccessful) parse(JSONObject(r.body!!.string())) else null
         }
@@ -51,42 +53,64 @@ object Net {
         }
     }
 
+    fun hasLocationPermission(ctx: Context): Boolean =
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
     @SuppressLint("MissingPermission")
-    suspend fun gpsCity(ctx: Context): String? {
-        val granted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (granted != PackageManager.PERMISSION_GRANTED) return null
+    private suspend fun currentLocation(ctx: Context): Location? {
+        if (!hasLocationPermission(ctx)) return null
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val provider = LocationManager.NETWORK_PROVIDER
-        if (!runCatching { lm.isProviderEnabled(provider) }.getOrDefault(false)) return null
-        val loc = withTimeoutOrNull(12_000) {
-            suspendCancellableCoroutine<Location?> { c ->
-                val cs = CancellationSignal()
-                c.invokeOnCancellation { cs.cancel() }
-                LocationManagerCompat.getCurrentLocation(lm, provider, cs, ContextCompat.getMainExecutor(ctx)) {
-                    c.resume(it)
+        val fine = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val providers = buildList {
+            add(LocationManager.NETWORK_PROVIDER)
+            if (fine) add(LocationManager.GPS_PROVIDER)
+        }.filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+        for (provider in providers) {
+            val loc = withTimeoutOrNull(10_000) {
+                suspendCancellableCoroutine<Location?> { c ->
+                    val cs = CancellationSignal()
+                    c.invokeOnCancellation { cs.cancel() }
+                    LocationManagerCompat.getCurrentLocation(lm, provider, cs, ContextCompat.getMainExecutor(ctx)) {
+                        if (c.isActive) c.resume(it)
+                    }
                 }
             }
-        } ?: return null
-        return withContext(Dispatchers.IO) {
+            if (loc != null) return loc
+        }
+        return providers.firstNotNullOfOrNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+    }
+
+    /** Device position + reverse-geocoded "City, CC" (OpenStreetMap Nominatim). */
+    suspend fun gps(ctx: Context): GpsFix? {
+        val loc = currentLocation(ctx) ?: return null
+        val city = withContext(Dispatchers.IO) {
             val url = "https://nominatim.openstreetmap.org/reverse?lat=${loc.latitude}&lon=${loc.longitude}" +
                 "&format=json&zoom=10&accept-language=en"
             fetch(url) { j ->
                 val a = j.optJSONObject("address") ?: return@fetch null
-                val city = listOf("city", "town", "village", "municipality", "county")
+                val c = listOf("city", "town", "village", "municipality", "county")
                     .map { a.optString(it) }.firstOrNull { it.isNotEmpty() } ?: ""
-                join(city, a.optString("country_code").uppercase()).ifEmpty { null }
+                join(c, a.optString("country_code").uppercase()).ifEmpty { null }
             }
-        }
+        } ?: ""
+        return GpsFix(city, loc.latitude, loc.longitude)
     }
 
-    fun connType(ctx: Context): String {
-        val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return ""
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return ""
-        return when {
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile"
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+    fun netInfo(ctx: Context): NetInfo {
+        val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return NetInfo()
+        val net = cm.activeNetwork ?: return NetInfo()
+        val caps = cm.getNetworkCapabilities(net)
+        val conn = when {
+            caps == null -> ""
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "eth"
             else -> ""
         }
+        val ip = cm.getLinkProperties(net)?.linkAddresses
+            ?.firstOrNull { it.address is Inet4Address && !it.address.isLoopbackAddress }
+            ?.address?.hostAddress.orEmpty()
+        return NetInfo(conn, ip)
     }
 }
