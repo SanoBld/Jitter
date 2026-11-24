@@ -24,7 +24,6 @@ object Servers {
         s("Strasbourg 10 GB", "Strasbourg, FR", "OVH", "🇫🇷", "https://proof.ovh.net/files/10Gb.dat", 16, "10 GB"),
         s("Strasbourg 1 GB", "Strasbourg, FR", "OVH", "🇫🇷", "https://proof.ovh.net/files/1Gb.dat", 8, "1 GB"),
         s("Paris 100 MB", "Paris, FR", "OVH", "🇫🇷", "https://proof.ovh.net/files/100Mb.dat", 4, "100 MB"),
-        s("Paris", "Paris, FR", "Hetzner", "🇫🇷", "https://speed.hetzner.de/100MB.bin", 4, "100 MB"),
         s("Falkenstein 10 GB", "Falkenstein, DE", "Hetzner", "🇩🇪", "https://fsn1-speed.hetzner.com/10GB.bin", 16, "10 GB"),
         s("Falkenstein 1 GB", "Falkenstein, DE", "Hetzner", "🇩🇪", "https://fsn1-speed.hetzner.com/1GB.bin", 8, "1 GB"),
         s("Falkenstein 100 MB", "Falkenstein, DE", "Hetzner", "🇩🇪", "https://fsn1-speed.hetzner.com/100MB.bin", 4, "100 MB"),

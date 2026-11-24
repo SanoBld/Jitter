@@ -131,7 +131,7 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
             val s = settings.value
             val all = servers(s)
             val first = all.indexOfFirst { it.url == s.serverUrl }.coerceAtLeast(0)
-            val order = all.indices.map { (first + it) % all.size }.let { if (s.fallback) it.take(4) else it.take(1) }
+            val order = all.indices.map { (first + it) % all.size }.let { if (s.fallback) it.take(5) else it.take(1) }
             refreshNet()
             test.value = TestState(testing = true, phase = Phase.CHECKING)
             var err = Msg("err_no_server")

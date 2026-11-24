@@ -60,23 +60,30 @@ object SpeedService {
         .connectionPool(ConnectionPool(96, 1, TimeUnit.MINUTES))
         .build()
 
+    /** Short timeouts so a dead server fails fast instead of blocking the test. */
+    private val pingClient: OkHttpClient = client.newBuilder()
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
+        .callTimeout(6, TimeUnit.SECONDS)
+        .build()
+
+    /** Cloudflare has a zero-byte endpoint; other servers use the file URL with a 1-byte range. */
+    private fun pingUrlOf(url: String): String =
+        if (url.contains("speed.cloudflare.com/__down")) "https://speed.cloudflare.com/__down?bytes=0" else url
+
     /** Time to first byte in ms, or -1 on failure. */
     private fun pingBlocking(url: String): Int {
-        val req = Request.Builder().url(url).header("Range", "bytes=0-0").build()
+        val req = Request.Builder().url(pingUrlOf(url)).header("Range", "bytes=0-0").build()
         val t0 = System.nanoTime()
         return try {
-            client.newCall(req).execute().use { r ->
+            pingClient.newCall(req).execute().use { r ->
                 val ms = ((System.nanoTime() - t0) / 1_000_000).toInt()
                 when (r.code) {
-                    206 -> {
-                        r.body?.bytes()
-                        ms
-                    }
-                    200 -> ms
+                    200, 206, 416 -> ms
                     else -> -1
                 }
             }
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             -1
         }
     }
@@ -90,13 +97,19 @@ object SpeedService {
         return sqrt(v.sumOf { (it - avg) * (it - avg) } / v.size).toInt()
     }
 
-    /** Idle ping: 1 warm-up request (DNS + TLS), then 5 measured ones. */
+    /** Idle ping: 1 warm-up request (DNS + TLS), then 4 measured ones. Gives up after 2 failures in a row. */
     suspend fun ping(url: String): PingResult? = withContext(Dispatchers.IO) {
         val v = ArrayList<Int>()
-        for (i in 0 until 6) {
+        var fails = 0
+        for (i in 0 until 5) {
             val ms = pingBlocking(url)
-            if (i > 0 && ms >= 0) v.add(ms)
-            delay(150)
+            if (ms < 0) {
+                if (++fails >= 2) break
+                continue
+            }
+            fails = 0
+            if (i > 0) v.add(ms)
+            delay(100)
         }
         if (v.isEmpty()) null else PingResult(v.average().toInt(), jitterOf(v))
     }
