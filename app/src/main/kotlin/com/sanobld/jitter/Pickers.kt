@@ -95,7 +95,7 @@ private fun ServerPicker(vm: JitterViewModel, s: Settings, onClose: () -> Unit) 
                     chunk.map { sv ->
                         async {
                             val p = SpeedService.check(sv.url)
-                            sv.url to (if (p.first >= 0) "${p.first} ms" else "✗ " + p.second.take(24))
+                            sv.url to (if (p.first >= 0) "${p.first} ms · ${p.second}" else "✗ " + p.second.take(24))
                         }
                     }.awaitAll().forEach { (u, t) -> res = res + (u to t) }
                 }
