@@ -19,6 +19,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +51,34 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppRoot(vm: JitterViewModel, s: Settings) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val crashPrefs = remember { ctx.getSharedPreferences("jitter_crash", android.content.Context.MODE_PRIVATE) }
+    var crash by remember { mutableStateOf(crashPrefs.getString("trace", null)) }
+    crash?.let { trace ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { },
+            title = { Text(tr("crash_title")) },
+            text = {
+                Text(
+                    trace,
+                    Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("crash", trace))
+                }) { Text(tr("crash_copy")) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    crashPrefs.edit().remove("trace").apply()
+                    crash = null
+                }) { Text(tr("crash_close")) }
+            },
+        )
+    }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(s.lang) {

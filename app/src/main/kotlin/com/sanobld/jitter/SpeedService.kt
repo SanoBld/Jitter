@@ -236,7 +236,7 @@ object SpeedService {
                             }
                         }
                     }
-                } catch (e: IOException) {
+                } catch (e: Exception) {
                     if (active()) {
                         lastError.set(errText(e))
                         Thread.sleep(500)
@@ -264,7 +264,7 @@ object SpeedService {
                             Thread.sleep(if (r.code == 429) 3000 else 700)
                         }
                     }
-                } catch (e: IOException) {
+                } catch (e: Exception) {
                     if (active()) {
                         lastError.set(errText(e))
                         Thread.sleep(500)
@@ -283,7 +283,13 @@ object SpeedService {
         val limit = if (secs == 0) 600_000L else secs * 1000L
         val t0 = System.nanoTime()
         val jobs = List(conns) {
-            launch(Dispatchers.IO) { worker(total, calls) { isActive } }
+            launch(Dispatchers.IO) {
+                try {
+                    worker(total, calls) { isActive }
+                } catch (e: Throwable) {
+                    lastError.set(errText(e as? Exception ?: RuntimeException(e.toString())))
+                }
+            }
         }
         try {
             tick(total, t0, limit)

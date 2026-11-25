@@ -140,7 +140,13 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
             val usable: List<Int>
             if (s.fallback && order.size > 1) {
                 upd { it.copy(phase = Phase.CHECKING) }
-                val res = SpeedService.checkAll(order.map { all[it].url })
+                val res = try {
+                    SpeedService.checkAll(order.map { all[it].url })
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    order.map { 0 to "" }
+                }
                 usable = order.filterIndexed { k, _ -> res[k].first >= 0 }.take(2)
                 if (usable.isEmpty()) err = friendly(AppError("err_unreachable", res.first().second))
             } else usable = order
@@ -152,7 +158,7 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
                     break
                 } catch (e: CancellationException) {
                     throw e
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     err = friendly(e)
                     if (n < usable.lastIndex) upd { it.copy(phase = Phase.SWITCHING) }
                 }
