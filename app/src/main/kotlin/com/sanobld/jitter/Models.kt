@@ -19,7 +19,7 @@ object Servers {
         SpeedServer(n, l, p, f, u, c, sz)
 
     val builtin = listOf(
-        s("Cloudflare 1 GB", "Anycast, Global", "Cloudflare", "🌐", "https://speed.cloudflare.com/__down?bytes=1073741824", 8, "1 GB"),
+        s("Cloudflare 256 MB", "Anycast, Global", "Cloudflare", "🌐", "https://speed.cloudflare.com/__down?bytes=268435456", 6, "256 MB"),
         s("Cloudflare 100 MB", "Anycast, Global", "Cloudflare", "🌐", "https://speed.cloudflare.com/__down?bytes=104857600", 4, "100 MB"),
         s("OVH 10 GB", "France", "OVH", "🇫🇷", "https://proof.ovh.net/files/10Gb.dat", 16, "10 GB"),
         s("OVH 1 GB", "France", "OVH", "🇫🇷", "https://proof.ovh.net/files/1Gb.dat", 8, "1 GB"),

@@ -2,6 +2,10 @@ package com.sanobld.jitter
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -15,7 +19,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.ConnectionPool
 import okhttp3.MediaType.Companion.toMediaType
@@ -65,6 +68,16 @@ object SpeedService {
 
     val client: OkHttpClient = OkHttpClient.Builder()
         .protocols(listOf(Protocol.HTTP_1_1))
+        // Browser-like headers: some servers drop unknown clients; "identity" stops gzip so byte counts stay real.
+        .addInterceptor { chain ->
+            chain.proceed(
+                chain.request().newBuilder()
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36")
+                    .header("Accept-Encoding", "identity")
+                    .header("Accept", "*/*")
+                    .build(),
+            )
+        }
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
@@ -92,6 +105,8 @@ object SpeedService {
         .build()
 
     /** Cloudflare has a zero-byte endpoint; other servers use the file URL with a 1-byte range. */
+    private fun isCf(url: String) = url.contains("speed.cloudflare.com/__down")
+
     private fun pingUrlOf(url: String): String =
         if (url.contains("speed.cloudflare.com/__down")) "https://speed.cloudflare.com/__down?bytes=0" else url
 
@@ -107,7 +122,7 @@ object SpeedService {
     /** One timed request. Returns (ms, "") on success or (-1, reason) on failure. */
     private suspend fun probeOnce(url: String, timeoutMs: Long, plain: Boolean, h2: Boolean = false): Pair<Int, String> {
         val b = Request.Builder().url(pingUrlOf(url))
-        if (plain) b.header("Connection", "close") else b.header("Range", "bytes=0-0")
+        if (isCf(url)) b.head() else if (plain) b.header("Connection", "close") else b.header("Range", "bytes=0-0")
         val req = b.build()
         val t0 = System.nanoTime()
         return try {
@@ -137,13 +152,46 @@ object SpeedService {
         return if (third.first >= 0) third else second
     }
 
-    /** Used by the "check servers" button. */
-    suspend fun check(url: String): Pair<Int, String> = probe(url, 5000)
+    /** Real mini-download (first 32 KB). Proves data really flows. Returns (ms to first byte, "") or (-1, reason). */
+    private suspend fun fetchOnce(url: String, h2: Boolean): Pair<Int, String> {
+        val b = Request.Builder().url(if (isCf(url)) "https://speed.cloudflare.com/__down?bytes=32768" else url)
+        if (!isCf(url)) b.header("Range", "bytes=0-32767")
+        val req = b.build()
+        val t0 = System.nanoTime()
+        return try {
+            withTimeout(5000) {
+                withContext(Dispatchers.IO) {
+                    (if (h2) h2Client else pingClient).newCall(req).execute().use { r ->
+                        if (r.code != 200 && r.code != 206) return@use -1 to "HTTP ${r.code}"
+                        val n = r.body!!.byteStream().read(ByteArray(8192))
+                        if (n > 0) ((System.nanoTime() - t0) / 1_000_000).toInt() to "" else -1 to "no data"
+                    }
+                }
+            }
+        } catch (e: TimeoutCancellationException) {
+            -1 to "timeout"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            -1 to (e.javaClass.simpleName + (e.message?.let { ": " + it.take(60) } ?: ""))
+        }
+    }
+
+    suspend fun check(url: String): Pair<Int, String> {
+        val first = fetchOnce(url, false)
+        if (first.first >= 0 || first.second == "timeout" || first.second.startsWith("HTTP")) return first
+        val second = fetchOnce(url, true)
+        if (second.first >= 0) runCatching { h2Hosts.add(url.toHttpUrl().host) }
+        return if (second.first >= 0) second else first
+    }
+
+    /** Checks all candidates at the same time (about 5 s max) so dead servers cost almost nothing. */
+    suspend fun checkAll(urls: List<String>): List<Pair<Int, String>> = coroutineScope {
+        urls.map { async { check(it) } }.awaitAll()
+    }
 
     suspend fun pingOnce(url: String): Int = probe(url, 5000).first
 
-    /** null = reachable, otherwise the reason. */
-    suspend fun reach(url: String): String? = probe(url, 3000).let { if (it.first >= 0) null else it.second }
 
     /** Standard deviation of the samples, like the previous Flutter app. */
     fun jitterOf(v: List<Int>): Int {
@@ -182,7 +230,7 @@ object SpeedService {
                 call.execute().use { r ->
                     if (!r.isSuccessful) {
                         lastCode.set(r.code)
-                        Thread.sleep(if (r.code == 429) 2000 else 300)
+                        Thread.sleep(if (r.code == 429) 3000 else 500)
                     } else {
                         val s = r.body!!.byteStream()
                         while (active()) {
@@ -209,7 +257,7 @@ object SpeedService {
                     r.body?.bytes()
                     if (!r.isSuccessful) {
                         lastCode.set(r.code)
-                        Thread.sleep(if (r.code == 429) 2000 else 300)
+                        Thread.sleep(if (r.code == 429) 3000 else 500)
                     }
                 }
             } catch (e: IOException) {

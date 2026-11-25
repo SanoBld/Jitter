@@ -131,17 +131,22 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
             val s = settings.value
             val all = servers(s)
             val first = all.indexOfFirst { it.url == s.serverUrl }.coerceAtLeast(0)
-            val order = all.indices.map { (first + it) % all.size }.let { if (s.fallback) it.take(5) else it.take(1) }
+            val order = all.indices.map { (first + it) % all.size }.let { if (s.fallback) it.take(6) else it.take(1) }
             refreshNet()
             test.value = TestState(testing = true, phase = Phase.CHECKING)
             var err = Msg("err_no_server")
             var ok = false
-            for ((n, i) in order.withIndex()) {
+            // 1) check candidates in parallel with a real mini-download; keep the healthy ones, in order
+            val usable: List<Int>
+            if (s.fallback && order.size > 1) {
+                upd { it.copy(phase = Phase.CHECKING) }
+                val res = SpeedService.checkAll(order.map { all[it].url })
+                usable = order.filterIndexed { k, _ -> res[k].first >= 0 }.take(2)
+                if (usable.isEmpty()) err = friendly(AppError("err_unreachable", res.first().second))
+            } else usable = order
+            // 2) run the test on the first healthy server (second one only if it breaks)
+            for ((n, i) in usable.withIndex()) {
                 try {
-                    if (s.fallback && order.size > 1) {
-                        upd { it.copy(phase = Phase.CHECKING) }
-                        SpeedService.reach(all[i].url)?.let { why -> throw AppError("err_unreachable", why) }
-                    }
                     runPhases(all[i], s)
                     ok = true
                     break
@@ -149,7 +154,7 @@ class JitterViewModel(app: Application) : AndroidViewModel(app) {
                     throw e
                 } catch (e: Exception) {
                     err = friendly(e)
-                    if (n < order.lastIndex) upd { it.copy(phase = Phase.SWITCHING) }
+                    if (n < usable.lastIndex) upd { it.copy(phase = Phase.SWITCHING) }
                 }
             }
             if (!ok) upd { it.copy(testing = false, phase = Phase.ERROR, error = err, progress = 0f) }
